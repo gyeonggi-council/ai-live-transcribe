@@ -17,10 +17,18 @@ from app.services.dictionary import get_default_dictionary
 
 logger = logging.getLogger(__name__)
 
-_BASE = (
-    "경기도의회 회의 발언입니다. 의원 이름과 의회 용어(위원장, 조례안, 부의, 의결, 질의)를 정확히 표기하세요. "
-    "'위원'과 '의원'을 문맥에 맞게 구분하고, 회수·대수·차수는 아라비아 숫자로 표기합니다(예: 제392회, 제12대, 제1차)."
-)
+def _base_prompt() -> str:
+    """전사 프롬프트의 머리말. 기관 이름은 설정에서 온다(기본값이 "경기도의회" 라 문구는 그대로다).
+
+    ★모듈 상수로 두면 import 시점에 값이 굳어 환경변수를 바꿔도 안 먹는다.
+    """
+    from app.core import features
+
+    return (
+        f"{features.org_name()} 회의 발언입니다. "
+        "의원 이름과 의회 용어(위원장, 조례안, 부의, 의결, 질의)를 정확히 표기하세요. "
+        "'위원'과 '의원'을 문맥에 맞게 구분하고, 회수·대수·차수는 아라비아 숫자로 표기합니다(예: 제392회, 제12대, 제1차)."
+    )
 
 # 위원회별 캐시 (명부 DB 조회 절약)
 _cache: dict[str, tuple[float, str]] = {}
@@ -62,7 +70,7 @@ def build_stt_prompt(
     if cached and now - cached[0] < _CACHE_TTL_SECONDS and not extra_names:
         return cached[1]
 
-    parts = [_BASE]
+    parts = [_base_prompt()]
 
     if committee:
         try:

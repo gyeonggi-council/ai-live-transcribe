@@ -17,10 +17,12 @@ import httpx
 
 from app.services.hwpx_export import _parse_meeting_title
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
-_LIST_URL = "https://kms.ggc.go.kr/svc/cms/mnts/MntsLatelyList.do"
-_VIEWER_URL = "https://kms.ggc.go.kr/cms/mntsViewer.do"
+_LIST_URL = f"{settings.kms_base_url.rstrip('/')}/svc/cms/mnts/MntsLatelyList.do"
+_VIEWER_URL = f"{settings.kms_base_url.rstrip('/')}/cms/mntsViewer.do"
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 

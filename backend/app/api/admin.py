@@ -253,10 +253,10 @@ async def _check_kms() -> dict:
 
 async def _check_hls() -> dict:
     """경기도의회 HLS 스트리밍 채널 상태를 확인합니다."""
-    from app.core.channels import CHANNELS
+    from app.core.channels import get_all_channels
 
     active_channels = 0
-    details: dict = {"total_channels": len(CHANNELS)}
+    details: dict = {"total_channels": len(get_all_channels())}
 
     try:
         # 활성 라이브 STT 채널 수 확인 (OpenAI Realtime 엔진)

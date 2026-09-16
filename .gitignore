@@ -148,11 +148,47 @@ backend/_ai_*.txt
 backend/_livecer_*.json
 backend/_spk_*.json
 
-# 비밀 자료 (공개 저장소 안전장치)
+# ── 공개 저장소 안전장치 ────────────────────────────────────────────────────
+# 비밀·자격증명
 *.key
 *.crt
 *.p12
 *.pfx
+*.pem
+*.ppk
+*.jks
+*.keystore
 id_rsa*
-kubeconfig
-.env.production
+id_ed25519*
+kubeconfig*
+*.kubeconfig
+.env.*
+!.env.example
+!.env.local.example
+.npmrc
+.netrc
+.pypirc
+*.tfstate
+*.tfstate.*
+
+# 회의 원문이 새 나갈 수 있는 경로 — 스크립트가 만드는 산출물이다.
+# 확장자 단위로 막는다: backend/recordings/ 만 막으면 CWD 가 다를 때 그대로 커밋된다.
+*.srt
+*.vtt
+*.wav
+*.mp3
+*.mp4
+*.m4a
+pcm_*.raw
+ghost_cleanup_backup_*.json
+_steno_*.txt
+_ai_*.txt
+out.json
+timing.json
+e2e.json
+
+# DB 덤프·로그
+*.sql.gz
+*.dump
+*.log
+*.sqlite*

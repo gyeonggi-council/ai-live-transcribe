@@ -197,6 +197,21 @@ spec:
             # `kubectl logs … | grep sync_need` 로 회의 전체 p99 를 재고 내린다(edge_lag 실측이 1.5~2 면 15~16).
             # 값 변경 = 파드 재시작 = 정회 때만. 너무 낮으면 자막이 몇 초 늦게 우르르 뜬다(붕괴 아님) — 다음 정회에 올린다.
             - { name: LIVE_SYNC_TARGET_SEC, value: "17" }
+            # ── 기관(테넌트) 설정 (2026-09-16) ─────────────────────────────
+            # 값은 **지금 코드 기본값과 같다.** 여기 먼저 적어 두는 이유:
+            # 공개판에서 코드 기본값을 비울 때 경기도 운영이 함께 죽지 않게 하기 위해서다.
+            # 특히 GGC_LOGIN_BASE_URL 은 여태 이 매니페스트에 없어서 코드 기본값으로 돌고 있었고,
+            # 그 기본값을 먼저 비웠다면 QR 로그인이 즉시 503 이 된다(이 서비스엔 아이디 로그인이 없다).
+            - { name: ORG_NAME, value: "경기도의회" }
+            - { name: KMS_BASE_URL, value: "https://kms.ggc.go.kr" }
+            - { name: COUNCIL_CALENDAR_URL, value: "https://www.ggc.go.kr/site/main/schedule/list/{date}/ALL" }
+            - { name: COUNCILOR_API_BASE_URL, value: "https://www.ggc.go.kr/site/main/api/portaltoggc/" }
+            - { name: COUNCIL_ONAIR_API_URL, value: "https://live.ggc.go.kr/getOnairListTodayData.do" }
+            - { name: GGC_LOGIN_BASE_URL, value: "https://ggc-mobile-login-git.vercel.app" }
+            # 채널 목록은 subtitle.channels 표에서 온다. 사고 시 파드 env 하나로 되돌린다:
+            #   CHANNELS_SOURCE=seed  → 표를 아예 안 보고 코드 시드 18채널로 돈다.
+            - { name: CHANNELS_SOURCE, value: "db" }
+            - { name: DEFAULT_STATUS_PROVIDER, value: "ggc" }
             # 영상추출기(exe) 배포 채널 재개 (2026-09-08 사용자 결정 — 09-03 "설치형 중단" 을 되돌림).
             # version.json 의 다운로드 절대주소는 이 값으로 만든다 — Traefik 이 /transcribe 를 벗긴 뒤라
             # request.base_url 로는 접두어가 빠져 404 가 난다. 인증서가 유효한 도메인을 쓴다.

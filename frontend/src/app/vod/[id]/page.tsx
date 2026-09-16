@@ -682,7 +682,7 @@ function VodViewerPageContent({ params }: VodViewerPageProps) {
                     <VideoClockBadge
                       getWallMs={getVodWallMs}
                       withDate
-                      approximate={clockSource === 'estimated'}
+                      approximate={clockSource !== 'recorded'}
                     />
                   )
                 }

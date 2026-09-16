@@ -1960,9 +1960,110 @@ export async function mergeSpeakers(meetingId: string, fromSpeaker: string, toSp
 /**
  * 의원 목록 조회
  */
-export async function getCouncilors(params?: { committee?: string; q?: string }): Promise<CouncilorType[]> {
+// ── 얼굴로 의원 찾기 (2026-09-16) ────────────────────────────────────────────
+export interface FaceMatchType {
+  /** 화면 대비 비율 [x, y, w, h] — 보낸 그림과 화면 크기가 달라도 그대로 쓸 수 있다 */
+  box: [number, number, number, number];
+  det_score: number;
+  face_px: number;
+  score: number;
+  margin: number;
+  councilor_id: string | null;
+  name: string | null;
+  party: string | null;
+  district: string | null;
+  confident: boolean;
+  /** face = 얼굴만으로, face+speaker = 지금 발언자와 일치 */
+  basis: 'face' | 'face+speaker';
+  reason?: string;
+}
+
+export interface FaceIdentifyResponse {
+  faces: FaceMatchType[];
+  width?: number;
+  height?: number;
+  committee?: string | null;
+  elapsed_ms?: number;
+  error?: string;
+}
+
+/** 캡처한 화면 한 장을 보내 의원을 식별한다. */
+export async function identifyFaces(
+  image: Blob,
+  opts: { channelId?: string; speakerHint?: string | null } = {}
+): Promise<FaceIdentifyResponse> {
+  const form = new FormData();
+  form.append('file', image, 'frame.jpg');
+  if (opts.channelId) form.append('channel_id', opts.channelId);
+  if (opts.speakerHint) form.append('speaker_hint', opts.speakerHint);
+  // FormData 는 Content-Type 을 브라우저가 경계문자와 함께 직접 정해야 해서 apiClient 를 쓰지 않는다
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  const response = await fetch(`${API_BASE_URL}/api/faces/identify`, {
+    method: 'POST',
+    body: form,
+    headers: {
+      'ngrok-skip-browser-warning': '1',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...guestHeaders(token),
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || '의원을 찾지 못했습니다.');
+  }
+  return response.json();
+}
+
+/** 브라우저가 화면을 못 뜰 때(iOS 네이티브 HLS 등) 서버가 직접 떠서 식별한다. */
+export async function identifyFacesOnChannel(
+  channelId: string,
+  speakerHint?: string | null
+): Promise<FaceIdentifyResponse> {
+  const q = speakerHint ? `?speaker_hint=${encodeURIComponent(speakerHint)}` : '';
+  return apiClient<FaceIdentifyResponse>(`/api/channels/${channelId}/identify-faces${q}`, {
+    method: 'POST',
+  });
+}
+
+export interface CouncilorSpeechType {
+  subtitle_id: string;
+  meeting_id: string;
+  meeting_title: string | null;
+  committee: string | null;
+  meeting_date: string | null;
+  start_time: number | null;
+  speaker: string | null;
+  text: string;
+}
+
+export interface CouncilorDetailType {
+  councilor: CouncilorType & {
+    district_detail?: string | null;
+    term?: number | null;
+    office_number?: string | null;
+    email?: string | null;
+    homepage_url?: string | null;
+  };
+  career: string[];
+  positions: string[];
+  recent_speeches: CouncilorSpeechType[];
+}
+
+/** 의원 상세 — 약력·소속 위원회·최근 발언. */
+export function getCouncilorDetail(
+  councilorId: string,
+  speeches = 8
+): Promise<CouncilorDetailType> {
+  return apiClient<CouncilorDetailType>(
+    `/api/councilors/${councilorId}/detail?speeches=${speeches}`
+  );
+}
+
+export async function getCouncilors(params?: { committee?: string; committeeCode?: string; q?: string }): Promise<CouncilorType[]> {
   const searchParams = new URLSearchParams();
   if (params?.committee) searchParams.set('committee', params.committee);
+  // 예산결산특별위원회·윤리특별위원회는 의원정보 API 에 없어 코드로 홈페이지 명단을 읽는다
+  if (params?.committeeCode) searchParams.set('committee_code', params.committeeCode);
   if (params?.q) searchParams.set('q', params.q);
   const query = searchParams.toString();
   const result = await apiClient<{ items: CouncilorType[] } | CouncilorType[]>(`/api/councilors${query ? `?${query}` : ''}`);
@@ -2376,6 +2477,115 @@ export async function resolveMeetingByMidx(midx: string): Promise<{ meeting_id: 
   return apiClient(`/api/clip-jobs/resolve?midx=${encodeURIComponent(midx)}`);
 }
 
+/** 인증 헤더 — JWT 가 있으면 Bearer, 없으면 의회망 손님 헤더(X-Guest-Id) */
+function clipAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  return token ? { Authorization: `Bearer ${token}` } : guestHeaders(null);
+}
+
+async function _throwApiError(response: Response, fallback: string): Promise<never> {
+  let errorMessage = `${fallback}: ${response.status}`;
+  try {
+    const errorData = await response.json();
+    if (errorData.detail) {
+      errorMessage =
+        typeof errorData.detail === 'string'
+          ? errorData.detail
+          : errorData.detail.message || JSON.stringify(errorData.detail);
+    }
+  } catch {
+    /* ignore */
+  }
+  throw new ApiError(response.status, errorMessage);
+}
+
+export interface ClipFileBlob {
+  blob: Blob;
+  /** Content-Disposition 이 준 이름 (없으면 요청한 이름) */
+  filename: string;
+}
+
+/**
+ * 클립 파일(mp4/srt)을 **받기만** 한다 — 저장은 saveBlob 이 따로 한다.
+ *
+ * 쪼갠 이유(2026-09-16): 「받기 전에 재생해 확인」 모달이 같은 바이트를 재생에 쓰고,
+ * 확인한 뒤 「이 파일 받기」를 누르면 **다시 받지 않고 그 blob 을 저장**한다.
+ *
+ * onProgress 는 Content-Length 가 있을 때만 0~1 을 준다(없으면 부르지 않는다 —
+ * 화면은 부정형 막대로 떨어진다).
+ */
+export async function fetchClipJobFile(
+  meetingId: string,
+  jobId: string,
+  fileName: string,
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal
+): Promise<ClipFileBlob> {
+  const url =
+    `${API_BASE_URL}/api/meetings/${meetingId}/clip-jobs/${jobId}/download?file=` +
+    encodeURIComponent(fileName);
+  const response = await fetch(url, { headers: clipAuthHeaders(), signal });
+  if (!response.ok) await _throwApiError(response, '다운로드 실패');
+
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filename = _filenameFromDisposition(disposition, fileName);
+  const total = Number(response.headers.get('Content-Length') || 0);
+
+  // 진행률은 총 길이를 알고 스트림을 읽을 수 있을 때만. 둘 중 하나라도 없으면
+  // 통째로 받는다(jsdom 은 body.getReader 가 없어 테스트가 이 경로로 온다).
+  if (!onProgress || !total || !response.body?.getReader) {
+    return { blob: await response.blob(), filename };
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      onProgress(Math.min(1, received / total));
+    }
+  }
+  return {
+    blob: new Blob(chunks as BlobPart[], {
+      type: response.headers.get('Content-Type') || 'application/octet-stream',
+    }),
+    filename,
+  };
+}
+
+/** 이미 받아 둔 blob 을 파일로 저장한다 (a[download] 한 번). */
+export function saveBlob(blob: Blob, fileName: string): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+/**
+ * 클립 썸네일(JPEG, 약 20KB) — 서버가 필요할 때 ffmpeg 로 한 장 뽑아 캐시한다.
+ * `<img src>` 로 직접 못 거는 이유는 fetchClipJobFile 과 같다(인증이 헤더라서).
+ * 없으면 404 → null 을 돌려주고 화면은 자리표시로 떨어진다.
+ */
+export async function fetchClipThumb(
+  meetingId: string,
+  jobId: string,
+  fileName: string,
+  signal?: AbortSignal
+): Promise<Blob | null> {
+  const url =
+    `${API_BASE_URL}/api/meetings/${meetingId}/clip-jobs/${jobId}/thumbnail?file=` +
+    encodeURIComponent(fileName);
+  const response = await fetch(url, { headers: clipAuthHeaders(), signal });
+  if (!response.ok) return null;
+  return response.blob();
+}
+
 /**
  * 클립 파일(mp4/srt) 다운로드 — JWT 가 localStorage 라 <a href> 로는 인증이 안 붙는다.
  * fetch + blob 으로 받아 저장한다 (downloadClipJobResult 와 같은 패턴).
@@ -2385,38 +2595,8 @@ export async function downloadClipJobFile(
   jobId: string,
   fileName: string
 ): Promise<void> {
-  const url =
-    `${API_BASE_URL}/api/meetings/${meetingId}/clip-jobs/${jobId}/download?file=` +
-    encodeURIComponent(fileName);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-  const response = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : guestHeaders(null),
-  });
-  if (!response.ok) {
-    let errorMessage = `다운로드 실패: ${response.status}`;
-    try {
-      const errorData = await response.json();
-      if (errorData.detail) {
-        errorMessage =
-          typeof errorData.detail === 'string'
-            ? errorData.detail
-            : errorData.detail.message || JSON.stringify(errorData.detail);
-      }
-    } catch {
-      /* ignore */
-    }
-    throw new ApiError(response.status, errorMessage);
-  }
-  const blob = await response.blob();
-  const disposition = response.headers.get('Content-Disposition') || '';
-  const filename = _filenameFromDisposition(disposition, fileName);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(a.href);
+  const { blob, filename } = await fetchClipJobFile(meetingId, jobId, fileName);
+  saveBlob(blob, filename);
 }
 
 export async function getExtractorVersion(): Promise<ExtractorVersionType | null> {
@@ -2475,4 +2655,90 @@ export async function uploadExtractorRelease(form: {
   }
 
   return response.json() as Promise<ExtractorVersionType>;
+}
+
+// ─── 채널 관리 (2026-09-16) ───────────────────────────────────────────────
+// 다른 의회가 자기 생중계 주소를 넣는 자리. 전부 관리자 전용이며,
+// 공개 `/api/channels` 계약과 섞이지 않도록 `/api/admin/channels` 로 분리돼 있다.
+
+export interface AdminChannel {
+  id: string;
+  name: string;
+  code: string | null;
+  stream_url: string;
+  committee: string | null;
+  page_url: string | null;
+  status_provider: string;
+  manual_status: number | null;
+  manual_until: string | null;
+  sort_order: number;
+  is_active: boolean;
+  is_test: boolean;
+}
+
+export interface CouncilPreset {
+  name: string;
+  region: string;
+  homepage: string;
+  live_page: string | null;
+  vendor: string | null;
+  note: string;
+}
+
+export interface DiscoveredChannel {
+  suggested_id: string;
+  name: string;
+  m3u8_url: string;
+  code: string;
+  confidence: number;
+  evidence: string;
+  verified: boolean | null;
+  http_status: number | null;
+}
+
+export interface DiscoveryResult {
+  page_url: string;
+  vendor: string;
+  candidates: DiscoveredChannel[];
+  warnings: string[];
+  fetched: { url: string; status?: number; bytes?: number; error?: string }[];
+}
+
+export async function listAdminChannels(): Promise<{ items: AdminChannel[]; snapshot: Record<string, unknown> }> {
+  return apiClient('/api/admin/channels');
+}
+
+export async function listCouncilPresets(): Promise<{ councils: CouncilPreset[]; generated_at: string | null }> {
+  return apiClient('/api/admin/channels/presets');
+}
+
+export async function discoverChannels(pageUrl: string): Promise<DiscoveryResult> {
+  return apiClient('/api/admin/channels/discover', {
+    method: 'POST',
+    body: JSON.stringify({ page_url: pageUrl }),
+  });
+}
+
+export async function createAdminChannel(payload: Partial<AdminChannel>): Promise<AdminChannel> {
+  return apiClient('/api/admin/channels', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function createAdminChannelsBulk(
+  items: Partial<AdminChannel>[],
+): Promise<{ created: string[]; skipped: string[]; errors: { id: string; detail: string }[] }> {
+  return apiClient('/api/admin/channels/bulk', { method: 'POST', body: JSON.stringify({ items }) });
+}
+
+export async function updateAdminChannel(id: string, patch: Partial<AdminChannel>): Promise<AdminChannel> {
+  return apiClient(`/api/admin/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export async function deleteAdminChannel(id: string, hard = false): Promise<void> {
+  await apiClient(`/api/admin/channels/${id}?hard=${hard}`, { method: 'DELETE' });
+}
+
+export async function probeAdminChannel(
+  id: string,
+): Promise<{ ok: boolean; http_status?: number; detail: string; insecure_tls?: boolean }> {
+  return apiClient(`/api/admin/channels/${id}/probe`, { method: 'POST' });
 }

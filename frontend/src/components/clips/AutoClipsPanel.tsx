@@ -2,10 +2,20 @@
 
 import React, { useMemo, useState } from 'react';
 
+import ClipFileCard from '@/components/clips/ClipFileCard';
+import {
+  ClipJobTimes,
+  ClipStatusBadge,
+  EVICT_LABEL,
+  isActiveStatus,
+  itemsOf,
+  type ClipItem,
+} from '@/components/clips/clipJobView';
+import ClipPreviewModal, { type ClipPreviewTarget } from '@/components/clips/ClipPreviewModal';
 import { useAutoClips } from '@/hooks/useAutoClips';
 import { downloadClipJobFile } from '@/lib/api';
-import type { ClipJobFileType, ClipJobType } from '@/types';
-import { formatBytes, formatHMS, formatLen } from '@/utils/clipTime';
+import type { ClipJobType } from '@/types';
+import { formatBytes, formatLen } from '@/utils/clipTime';
 
 /**
  * 자동으로 잘라 둔 영상 — AI 자막이 끝난 회의의 의원 전원 영상을 서버가 720p 로 미리 잘라 둔다(2026-09-10 사용자 결정).
@@ -13,6 +23,9 @@ import { formatBytes, formatHMS, formatLen } from '@/utils/clipTime';
  * 「확인 후 추출」 없이 받기만 하면 된다. 다만 의원 구간 정확도가 99% 가 아니라(392회 위원회 전수 약 81%)
  * 공유 전에 한 번 재생해 보라는 안내를 늘 붙인다(사용자 선택). 파일 이름은 워크벤치·설치형과 같다
  * (이름_회의명_번호.mp4) — 담당자가 세 경로로 받은 파일을 한 폴더에 모은다.
+ *
+ * 2026-09-16 — 썸네일 격자 + 요청 시각 + 받기 전 재생 확인 모달(사용자 요청). 화면 조각은
+ * `ClipFileCard`·`ClipThumb`·`ClipPreviewModal` 에 있고 「내 기록」·「전체」 탭과 공유한다.
  */
 export interface AutoClipsPanelProps {
   /** 있으면 그 회의 것만(없으면 자리를 차지하지 않는다). 없으면 최근 days 일 전체를 회의별로 */
@@ -27,46 +40,23 @@ export interface AutoClipsPanelProps {
 const DEFAULT_NOTICE =
   'AI 가 자막으로 찾은 구간을 자동으로 자른 영상입니다. 드물게 다른 사람의 발언이 섞일 수 있으니 공유하기 전에 한 번 재생해 확인해 주세요.';
 
-const STATUS_LABEL: Record<string, string> = {
-  queued: '자르기 대기',
-  running: '자르는 중',
-  done: '준비됨',
-  failed: '실패',
-  cancelled: '취소됨',
-  expired: '보관 끝남',
-};
-
-interface ClipItem {
-  file: ClipJobFileType;
-  srt?: ClipJobFileType;
-  seg?: { start: number; end: number; no?: number };
-}
-
-/** 구간별 파일(merge=false) — mp4 가 구간 순서대로 놓이고 같은 이름의 srt 가 짝이다 */
-function itemsOf(job: ClipJobType): ClipItem[] {
-  const files = job.files ?? [];
-  return files
-    .filter((f) => f.kind === 'mp4')
-    .map((f, i) => ({
-      file: f,
-      srt: files.find((x) => x.kind === 'srt' && x.name.replace(/\.srt$/i, '') === f.name.replace(/\.mp4$/i, '')),
-      seg: job.segments?.[i],
-    }));
-}
-
 function AutoJob({
   job,
   showSpeaker,
+  compactGrid,
   onPreview,
+  onCheck,
 }: {
   job: ClipJobType;
   showSpeaker: boolean;
+  compactGrid: boolean;
   onPreview?: (start: number) => void;
+  onCheck: (job: ClipJobType, item: ClipItem) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const items = itemsOf(job);
-  const active = job.status === 'queued' || job.status === 'running';
+  const active = isActiveStatus(job.status);
 
   const download = async (name: string) => {
     setBusy(name);
@@ -87,42 +77,35 @@ function AutoJob({
   };
 
   return (
-    <li data-testid="auto-clip-job" className="rounded-lg border border-border bg-white p-2 text-[13px] flex flex-col gap-1">
-      <div className="flex items-center gap-2 flex-wrap">
+    <li
+      data-testid="auto-clip-job"
+      className="flex flex-col gap-1.5 rounded-lg border border-border bg-white p-2.5 text-[13px]"
+    >
+      <div className="flex flex-wrap items-center gap-2">
         {showSpeaker && <span className="font-semibold text-text">{job.speaker_name || job.label}</span>}
-        <span
-          data-testid="auto-clip-status"
-          className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
-            job.status === 'done'
-              ? 'bg-green-100 text-green-800'
-              : active
-                ? 'bg-blue-100 text-blue-800'
-                : 'bg-gray-100 text-gray-600'
-          }`}
-        >
-          {STATUS_LABEL[job.status] ?? job.status}
-          {job.status === 'running' && job.segment_count > 1 && job.current_segment
-            ? ` ${job.current_segment}/${job.segment_count}`
-            : ''}
+        <span data-testid="auto-clip-status">
+          <ClipStatusBadge job={job} />
         </span>
         <span className="text-[11px] text-text-muted tabular-nums">
           {job.segment_count}구간 · {formatLen(job.total_seconds)}
           {job.bytes_total > 0 && ` · ${formatBytes(job.bytes_total)}`}
         </span>
+        <ClipJobTimes job={job} />
         {job.status === 'done' && items.length > 1 && (
           <button
             type="button"
             data-testid="auto-clip-download-all"
             onClick={downloadAll}
             disabled={busy !== null}
-            className="ml-auto rounded-md border border-border bg-white px-2 py-0.5 text-[12px] hover:bg-gray-50 disabled:opacity-50"
+            className="ml-auto rounded-md border border-border bg-white px-2 py-1 text-[12px] hover:bg-gray-50 disabled:opacity-50"
           >
             ⬇ 전부 받기
           </button>
         )}
       </div>
+
       {active && (
-        <div className="h-1.5 rounded bg-gray-200 overflow-hidden">
+        <div className="h-1.5 overflow-hidden rounded bg-gray-200">
           {job.status === 'running' && job.progress > 0 ? (
             <div className="h-full bg-primary transition-all" style={{ width: `${Math.round(job.progress * 100)}%` }} />
           ) : (
@@ -130,54 +113,33 @@ function AutoJob({
           )}
         </div>
       )}
+
       {job.status === 'done' && (
-        <ul className="flex flex-col gap-1">
-          {items.map((it, i) => (
-            <li key={it.file.name} className="flex items-center gap-2 flex-wrap">
-              <span className="w-8 text-[12px] text-text-muted tabular-nums">#{it.seg?.no ?? i + 1}</span>
-              {it.seg && (
-                <span className="text-[12px] text-text-muted tabular-nums">
-                  {formatHMS(it.seg.start)} · {formatLen(it.seg.end - it.seg.start)}
-                </span>
-              )}
-              {onPreview && it.seg && (
-                <button
-                  type="button"
-                  data-testid="auto-clip-preview"
-                  onClick={() => it.seg && onPreview(it.seg.start)}
-                  className="rounded-md border border-border bg-white px-2 py-0.5 text-[12px] hover:bg-gray-50"
-                >
-                  ▶ 보기
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid="auto-clip-download"
-                title={it.file.name}
-                onClick={() => download(it.file.name)}
-                disabled={busy !== null}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[12px] hover:bg-gray-50 disabled:opacity-50"
-              >
-                {busy === it.file.name ? '⏳' : '⬇'} 받기
-                <span className="text-text-muted">{formatBytes(it.file.bytes)}</span>
-              </button>
-              {it.srt && (
-                <button
-                  type="button"
-                  onClick={() => it.srt && download(it.srt.name)}
-                  disabled={busy !== null}
-                  className="text-[11px] underline text-text-muted disabled:opacity-50"
-                >
-                  📄 자막
-                </button>
-              )}
-            </li>
+        <div
+          data-testid="clip-file-grid"
+          className={`grid gap-2 ${
+            compactGrid ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'
+          }`}
+        >
+          {items.map((it) => (
+            <ClipFileCard
+              key={it.file.name}
+              job={job}
+              item={it}
+              onCheck={(x) => onCheck(job, x)}
+              onDownload={download}
+              busy={busy}
+              onSeek={onPreview}
+            />
           ))}
-        </ul>
+        </div>
       )}
+
       {job.status === 'failed' && <div className="text-[12px] text-red-700">{job.error || '자르지 못했습니다.'}</div>}
       {job.status === 'expired' && (
-        <div className="text-[12px] text-text-muted">보관 기간이 지나 지웠습니다 — 필요하면 아래에서 직접 자르세요.</div>
+        <div className="text-[12px] text-text-muted">
+          {EVICT_LABEL[job.evicted_reason ?? ''] ?? '파일이 지워졌습니다'} — 필요하면 아래에서 직접 자르세요.
+        </div>
       )}
       {err && <div className="text-[12px] text-red-700">{err}</div>}
     </li>
@@ -186,6 +148,7 @@ function AutoJob({
 
 export default function AutoClipsPanel({ meetingId = null, speakerName = null, days = 3, onPreview }: AutoClipsPanelProps) {
   const { jobs, notice, ttlDays, isLoading, error } = useAutoClips({ meetingId, days });
+  const [target, setTarget] = useState<ClipPreviewTarget | null>(null);
   const shown = useMemo(
     () => (speakerName ? jobs.filter((j) => (j.speaker_name || j.label) === speakerName) : jobs),
     [jobs, speakerName]
@@ -208,13 +171,39 @@ export default function AutoClipsPanel({ meetingId = null, speakerName = null, d
   if (meetingId && !jobs.length) return null;
 
   const people = new Set(shown.map((j) => j.speaker_name || j.label)).size;
+  // 워크벤치 안(회의 지정)은 좁은 자리라 격자를 2열로 낮춘다
+  const compactGrid = !!meetingId;
+
+  const check = (job: ClipJobType, item: ClipItem) =>
+    setTarget({
+      job,
+      fileName: item.file.name,
+      bytes: item.file.bytes,
+      no: item.seg?.no ?? item.index + 1,
+      seg: item.seg,
+    });
+
+  const renderJobs = (list: ClipJobType[], showSpeaker: boolean) => (
+    <ul className="flex flex-col gap-1.5">
+      {list.map((j) => (
+        <AutoJob
+          key={j.job_id}
+          job={j}
+          showSpeaker={showSpeaker}
+          compactGrid={compactGrid}
+          onPreview={onPreview}
+          onCheck={check}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <section
       data-testid="auto-clips-panel"
-      className="rounded-lg border border-warning-bg/40 bg-warning-bg/10 p-3 flex flex-col gap-2"
+      className="flex flex-col gap-2 rounded-lg border border-warning-bg/40 bg-warning-bg/10 p-3"
     >
-      <div className="flex items-baseline gap-2 flex-wrap">
+      <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-[14px] font-bold text-text">🎬 자동으로 잘라 둔 영상</h3>
         <span className="text-[12px] text-text-muted">
           {meetingId ? `${people}명` : `최근 ${days}일 · ${groups.length}회의`}
@@ -222,7 +211,7 @@ export default function AutoClipsPanel({ meetingId = null, speakerName = null, d
         </span>
       </div>
       <p data-testid="auto-clips-notice" className="text-[12px] leading-relaxed text-warning-dark">
-        ⚠ {notice || DEFAULT_NOTICE}
+        ⚠ {notice || DEFAULT_NOTICE} 썸네일이나 「▶ 재생 확인」을 누르면 받기 전에 이 화면에서 볼 수 있습니다.
       </p>
       {error && <div className="text-[12px] text-red-700">자동 클립을 불러오지 못했습니다: {error.message}</div>}
       {isLoading && !jobs.length && <div className="text-[12px] text-text-muted">불러오는 중…</div>}
@@ -236,26 +225,29 @@ export default function AutoClipsPanel({ meetingId = null, speakerName = null, d
           이 의원의 자동 영상은 없습니다 — 아래 「확인 후 추출」에서 직접 자를 수 있습니다.
         </div>
       )}
-      {meetingId ? (
-        <ul className="flex flex-col gap-1.5">
-          {shown.map((j) => (
-            <AutoJob key={j.job_id} job={j} showSpeaker={!speakerName} onPreview={onPreview} />
-          ))}
-        </ul>
-      ) : (
-        groups.map((g) => (
-          <div key={g.id} data-testid="auto-clips-meeting" className="flex flex-col gap-1.5">
-            <div className="text-[13px] font-semibold text-text truncate">
-              {g.title} {g.date ? <span className="font-normal text-text-muted">({g.date})</span> : null}
-            </div>
-            <ul className="flex flex-col gap-1.5">
-              {g.jobs.map((j) => (
-                <AutoJob key={j.job_id} job={j} showSpeaker onPreview={onPreview} />
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
+      {meetingId
+        ? renderJobs(shown, !speakerName)
+        : groups.map((g) => {
+            const clips = g.jobs.reduce((n, j) => n + j.segment_count, 0);
+            const bytes = g.jobs.reduce((n, j) => n + (j.bytes_total || 0), 0);
+            return (
+              <div
+                key={g.id}
+                data-testid="auto-clips-meeting"
+                className="flex flex-col gap-1.5 rounded-lg border border-border bg-white/70 p-2"
+              >
+                <div className="flex flex-wrap items-baseline gap-2 border-b border-border pb-1.5">
+                  <span className="text-[13px] font-semibold text-text">{g.title}</span>
+                  {g.date && <span className="text-[12px] text-text-muted">({g.date})</span>}
+                  <span className="ml-auto text-[11px] text-text-muted tabular-nums">
+                    의원 {g.jobs.length}명 · 영상 {clips}개{bytes > 0 ? ` · ${formatBytes(bytes)}` : ''}
+                  </span>
+                </div>
+                {renderJobs(g.jobs, true)}
+              </div>
+            );
+          })}
+      <ClipPreviewModal target={target} onClose={() => setTarget(null)} />
     </section>
   );
 }

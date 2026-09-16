@@ -16,6 +16,8 @@ def mock_status_service():
     """Mock ChannelStatusService."""
     service = MagicMock()
     service.fetch_status = AsyncMock(return_value={})
+    # auto_stt 는 채널 ID 기준 맵을 쓴다 — 코드가 없는 채널(기관 중립 제공자)도 잡아야 해서다.
+    service.get_status_map_by_id = AsyncMock(return_value={})
     service.subscribe = MagicMock(return_value=asyncio.Queue())
     service.unsubscribe = MagicMock()
     return service
@@ -105,9 +107,9 @@ class TestStartSttForLiveChannels:
         self, manager, mock_status_service, mock_stt_service
     ):
         """방송중(livestatus=1)인 채널에 STT를 시작한다."""
-        # ch14(본회의)의 code는 A011
-        mock_status_service.fetch_status = AsyncMock(
-            return_value={"A011": 1, "C001": 0}
+        # ch14 = 본회의(code A011), ch1 = 의회운영위(code C001)
+        mock_status_service.get_status_map_by_id = AsyncMock(
+            return_value={"ch14": 1, "ch1": 0}
         )
         mock_stt_service.is_running = MagicMock(return_value=False)
 
@@ -124,7 +126,7 @@ class TestStartSttForLiveChannels:
         self, manager, mock_status_service, mock_stt_service
     ):
         """이미 실행 중인 채널은 건너뛴다."""
-        mock_status_service.fetch_status = AsyncMock(return_value={"A011": 1})
+        mock_status_service.get_status_map_by_id = AsyncMock(return_value={"ch14": 1})
         mock_stt_service.is_running = MagicMock(return_value=True)
 
         await manager._start_stt_for_live_channels()
@@ -136,8 +138,8 @@ class TestStartSttForLiveChannels:
         self, manager, mock_status_service, mock_stt_service
     ):
         """방송중인 채널이 없으면 아무것도 시작하지 않는다."""
-        mock_status_service.fetch_status = AsyncMock(
-            return_value={"A011": 0, "C001": 3}
+        mock_status_service.get_status_map_by_id = AsyncMock(
+            return_value={"ch14": 0, "ch1": 3}
         )
 
         await manager._start_stt_for_live_channels()
@@ -251,7 +253,7 @@ class TestEnsureSttForLiveChannels:
         self, manager, mock_status_service, mock_stt_service
     ):
         """방송중인데 STT가 안 돌고 있는 채널을 시작한다."""
-        mock_status_service.fetch_status = AsyncMock(return_value={"A011": 1})
+        mock_status_service.get_status_map_by_id = AsyncMock(return_value={"ch14": 1})
         mock_stt_service.is_running = MagicMock(return_value=False)
 
         started = await manager.ensure_stt_for_live_channels()
@@ -272,7 +274,7 @@ class TestEnsureSttForLiveChannels:
         self, manager, mock_status_service, mock_stt_service
     ):
         """모든 방송 채널의 STT가 이미 실행 중이면 빈 리스트를 반환한다."""
-        mock_status_service.fetch_status = AsyncMock(return_value={"A011": 1})
+        mock_status_service.get_status_map_by_id = AsyncMock(return_value={"ch14": 1})
         mock_stt_service.is_running = MagicMock(return_value=True)
 
         started = await manager.ensure_stt_for_live_channels()

@@ -6,6 +6,7 @@
 - POST /api/meetings/{id}/clip-jobs             202 + job_id (영속 잡, PVC 보관 7일)
 - GET  /api/meetings/{id}/clip-jobs/{job_id}    상태
 - GET  /api/meetings/{id}/clip-jobs/{job_id}/download?file=   mp4/srt
+- GET  /api/meetings/{id}/clip-jobs/{job_id}/thumbnail?file=  잘라 둔 mp4 의 한 프레임(JPEG, 없으면 그때 뽑아 캐시)
 - DELETE /api/meetings/{id}/clip-jobs/{job_id}  취소 또는 즉시 삭제
 - GET  /api/clip-jobs?scope=mine|all&days=7     추출 기록
 - GET  /api/clip-jobs/resolve?midx=             KMS midx → meeting_id (옛 exe 링크 회수용)
@@ -376,6 +377,55 @@ async def download_clip_job_file(
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=EXPIRED_DETAIL)
     media = "application/x-subrip" if file.lower().endswith(".srt") else "video/mp4"
     return FileResponse(str(path), media_type=media, filename=file)
+
+
+@router.get("/meetings/{meeting_id}/clip-jobs/{job_id}/thumbnail", summary="클립 썸네일(JPEG)")
+async def get_clip_job_thumbnail(
+    meeting_id: str,
+    job_id: str,
+    file: str = Query(..., description="files[].name (mp4)"),
+    user: dict = Depends(require_role_or_council(*CLIP_ROLES)),
+    repo: ClipJobRepository = Depends(get_clip_job_repository),
+):
+    """잘라 둔 mp4 의 한 프레임. 없으면 그때 뽑아 잡 디렉터리에 캐시한다 (2026-09-16).
+
+    권한·화이트리스트 검증은 **다운로드와 같은 흐름 그대로**다 — 남의 잡은 404,
+    자동 클립은 로그인 5역할 모두에게 열린다. 못 만들면 404 이고 화면은 자리표시로 떨어진다.
+    """
+    from app.services.clip_thumbnail_service import ensure_clip_thumbnail
+
+    job = _load_job(repo, meeting_id, job_id, user)
+    if job.get("status") != "done":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="썸네일이 없습니다.")
+    if file.lower().endswith(".srt"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="영상 파일이 아닙니다.")
+
+    # 인덱스 = 그 잡의 **mp4 목록 안에서의 순번**. 프런트 itemsOf() 와 같은 규칙이라
+    # 카드와 썸네일이 같은 것을 가리킨다.
+    mp4s = [str(f.get("name") or "") for f in (job.get("files") or []) if f.get("kind") == "mp4"]
+    if file not in mp4s:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="그런 파일이 없습니다.")
+    index = mp4s.index(file)
+
+    try:
+        mp4_path = clip_store.safe_file(job_id, file)
+    except clip_store.UnsafePathError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="파일명이 올바르지 않습니다.")
+
+    segments = job.get("segments") or []
+    duration = None
+    if index < len(segments):
+        seg = segments[index]
+        duration = float(seg.get("end") or 0) - float(seg.get("start") or 0)
+
+    path = await ensure_clip_thumbnail(job_id, index, mp4_path, duration)
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="썸네일이 없습니다.")
+    return FileResponse(
+        str(path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.delete("/meetings/{meeting_id}/clip-jobs/{job_id}", summary="클립 잡 취소 또는 삭제")

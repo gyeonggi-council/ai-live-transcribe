@@ -20,12 +20,15 @@ from app.api.auth import router as auth_router
 from app.api.qr_login import router as qr_login_router
 from app.api.sso_login import router as sso_login_router
 from app.api.admin import router as admin_router
+from app.api.admin_channels import router as admin_channels_router
+from app.api.site_config import router as site_config_router
 from app.api.agenda_files import router as agenda_files_router
 from app.api.bills import router as bills_router
 from app.api.dictionary import router as dictionary_router
 from app.api.channels import router as channels_router
 from app.api.clips import router as clips_router
 from app.api.councilors import router as councilors_router
+from app.api.faces import router as faces_router
 from app.api.collaborative import router as collaborative_router
 from app.api.exports import router as exports_router
 from app.api.material_requests import router as material_requests_router
@@ -43,12 +46,35 @@ from app.api.subtitles import router as subtitles_router
 from app.api.tools import router as tools_router
 from app.api.voiceprints import router as voiceprints_router
 from app.api.websocket import router as websocket_router
+from app.core import features
 from app.core.config import settings
 from app.services.auto_stt import get_auto_stt_manager
 from app.services.diarize_service import diarize_service
 from app.services.live_corrector import live_corrector
 
 logger = logging.getLogger(__name__)
+
+
+async def _stream_probe_loop() -> None:
+    """probe 제공자를 쓰는 채널이 있을 때만 주기적으로 m3u8 을 확인한다.
+
+    예외를 절대 밖으로 던지지 않는다 — 이 루프가 죽으면 그 채널들이 영원히 '방송전'
+    으로 굳고, 증상이 '이식 장벽'과 똑같아져 로그로 구분할 수 없다.
+    """
+    from app.core.channels import get_all_channels
+    from app.services.channel_status import get_channel_status_service
+    from app.services.channel_status_providers import group_by_provider
+
+    while True:
+        try:
+            groups = group_by_provider(get_all_channels())
+            if groups.get("probe"):
+                await get_channel_status_service().fetch_status()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                          # noqa: BLE001
+            logger.debug("스트림 탐침 주기 실패: %s", e)
+        await asyncio.sleep(max(5, settings.probe_interval_seconds))
 
 
 async def _self_ping() -> None:
@@ -253,6 +279,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("고아 processing 복구 스킵: %s", e)
 
+    # 채널 목록 선적재 — auto_stt 보다 **먼저** 해야 한다.
+    # 비어 있으면 자동 STT 가 "방송중인 채널 없음" 으로 시작해 아무것도 안 잡는다.
+    try:
+        from app.core.channels import channels_snapshot_info, ensure_channels_loaded
+
+        loaded = await ensure_channels_loaded()
+        logger.info("채널 %d개 적재 (%s)", loaded, channels_snapshot_info()["source"])
+        if loaded == 0:
+            logger.error(
+                "채널이 하나도 없습니다 — /admin/channels 에서 생중계 주소를 등록해야 자막이 시작됩니다"
+            )
+    except Exception as e:
+        logger.warning("채널 적재 실패(폴백으로 진행): %s", e)
+
     auto_stt = get_auto_stt_manager()
     await auto_stt.start()
 
@@ -264,6 +304,11 @@ async def lifespan(app: FastAPI):
     # 프런트 '교정 중'→'교정됨' 전환.
     await live_corrector.start()
 
+    # 스트림 탐침 루프 — 기관 생중계 API 가 없는 채널(probe 제공자)의 방송 여부를 잰다.
+    # ★요청 경로가 아니라 여기서 돈다. /api/channels/status 안에서 탐침하면
+    #   시청자 수 × 채널 수만큼 CDN 요청이 나간다(시청자 50명 × 20채널 = 1회당 1000요청).
+    probe_task = asyncio.create_task(_stream_probe_loop(), name="stream-probe")
+
     # 상시 호스트(PORT 주입 환경: Docker/OCI/NCP 등)에서 idle sleep 방지용 self-ping
     self_ping_task = None
     if os.environ.get("PORT"):
@@ -273,7 +318,13 @@ async def lifespan(app: FastAPI):
     # KMS 최근회의영상 자동 등록 (등록 자체는 AI 비용 0) — 새 회기 영상 자동 유입.
     # 한 바퀴마다 AI 자막 자동 생성을 찔러 본다(상한·기간·검토본 보존 가드는 services/vod_auto_stt).
     kms_auto_task = None
-    if settings.kms_auto_register_interval_minutes > 0 and settings.supabase_url:
+    # 기관 영상관리시스템(KMS) 주소가 비면 이 루프를 아예 띄우지 않는다 —
+    # 안 그러면 30분마다 조용히 실패하는 로그만 쌓인다(다른 기관에는 그 시스템이 없다).
+    if (
+        settings.kms_auto_register_interval_minutes > 0
+        and settings.supabase_url
+        and features.kms_enabled()
+    ):
         kms_auto_task = asyncio.create_task(
             _kms_auto_register_loop(), name="kms-auto-register"
         )
@@ -312,7 +363,12 @@ async def lifespan(app: FastAPI):
         clip_sweep_task = asyncio.create_task(_clip_store_sweep_loop(), name="clip-store-sweep")
     # 의사일정 수집 — 라이브 회의에 회기·차수를 붙이고 '다가오는 일정'을 채운다.
     schedule_task = None
-    if settings.assembly_schedule_sync_interval_minutes > 0 and settings.supabase_url:
+    # 의정캘린더 주소가 비면 의사일정 수집을 띄우지 않는다.
+    if (
+        settings.assembly_schedule_sync_interval_minutes > 0
+        and settings.supabase_url
+        and features.schedule_sync_enabled()
+    ):
         schedule_task = asyncio.create_task(
             _assembly_schedule_loop(), name="assembly-schedule-sync"
         )
@@ -344,7 +400,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
-    for task in (self_ping_task, kms_auto_task, record_prune_task, schedule_task, summary_pregen_task, embed_pregen_task):
+    for task in (self_ping_task, kms_auto_task, record_prune_task, schedule_task,
+                 summary_pregen_task, embed_pregen_task, probe_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -400,6 +457,8 @@ app.include_router(auth_router)
 app.include_router(qr_login_router)
 app.include_router(sso_login_router)
 app.include_router(admin_router)
+app.include_router(admin_channels_router)
+app.include_router(site_config_router)
 app.include_router(agenda_files_router)
 app.include_router(bills_router)
 app.include_router(dictionary_router)
@@ -407,6 +466,7 @@ app.include_router(collaborative_router)
 app.include_router(channels_router)
 app.include_router(clips_router)
 app.include_router(councilors_router)
+app.include_router(faces_router)
 app.include_router(exports_router)
 app.include_router(material_requests_router)
 app.include_router(meeting_documents_router)

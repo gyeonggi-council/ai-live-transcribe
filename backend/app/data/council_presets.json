@@ -1,0 +1,439 @@
+{
+  "generated_at": "2026-09-16",
+  "source": "backend/scripts/harvest_council_presets.py (실제 접속해 확인)",
+  "note": "영상 주소가 아니라 생중계 **페이지** 주소다. 대부분의 의회는 방송 중일 때만 영상 주소가 드러나므로, 페이지를 넣고 자동 찾기를 돌린다.",
+  "councils": [
+    {
+      "name": "서울특별시의회",
+      "region": "광역",
+      "homepage": "https://ms.smc.seoul.kr/",
+      "live_page": "https://ms.smc.seoul.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "부산광역시의회",
+      "region": "광역",
+      "homepage": "https://council.busan.go.kr/",
+      "live_page": "https://council.busan.go.kr/broadcast/index",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "대구광역시의회",
+      "region": "광역",
+      "homepage": "https://council.daegu.go.kr/",
+      "live_page": "https://council.daegu.go.kr/kr/cast/live",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "인천광역시의회",
+      "region": "광역",
+      "homepage": "https://www.icouncil.go.kr/",
+      "live_page": "https://record.icouncil.go.kr/vod/index.do",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "광주광역시의회",
+      "region": "광역",
+      "homepage": "https://council.gwangju.go.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    },
+    {
+      "name": "대전광역시의회",
+      "region": "광역",
+      "homepage": "https://council.daejeon.go.kr/",
+      "live_page": "https://council.daejeon.go.kr/svc/air/OnAir.do",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "울산광역시의회",
+      "region": "광역",
+      "homepage": "https://www.council.ulsan.kr/",
+      "live_page": "http://www.council.ulsan.kr/cast/mainPage.do",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "페이지에 영상 주소가 보입니다 — 자동 찾기가 바로 잡습니다"
+    },
+    {
+      "name": "세종특별자치시의회",
+      "region": "광역",
+      "homepage": "https://council.sejong.go.kr/",
+      "live_page": "https://council.sejong.go.kr/css/egovframework/com/scc/broadcasting.css?v=1.3?ver=1.4.9",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "경기도의회",
+      "region": "광역",
+      "homepage": "https://www.ggc.go.kr/",
+      "live_page": "https://live.ggc.go.kr/onair/onair.do",
+      "vendor": "webpot",
+      "http_status": 200,
+      "note": "페이지에 영상 주소가 보입니다 — 자동 찾기가 바로 잡습니다"
+    },
+    {
+      "name": "강원특별자치도의회",
+      "region": "광역",
+      "homepage": "https://council.gangwon.kr/",
+      "live_page": "https://council.gangwon.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "충청북도의회",
+      "region": "광역",
+      "homepage": "https://council.chungbuk.go.kr/",
+      "live_page": "https://council.chungbuk.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "충청남도의회",
+      "region": "광역",
+      "homepage": "https://council.chungnam.go.kr/",
+      "live_page": "https://council.chungnam.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "전북특별자치도의회",
+      "region": "광역",
+      "homepage": "https://council.jeonbuk.kr/",
+      "live_page": "https://live.jbstatecouncil.jeonbuk.kr/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "전라남도의회",
+      "region": "광역",
+      "homepage": "https://www.jnassembly.go.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    },
+    {
+      "name": "경상북도의회",
+      "region": "광역",
+      "homepage": "https://council.gb.go.kr/",
+      "live_page": "https://council.gb.go.kr/minutes/cast/live",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "경상남도의회",
+      "region": "광역",
+      "homepage": "https://council.gyeongnam.go.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    },
+    {
+      "name": "제주특별자치도의회",
+      "region": "광역",
+      "homepage": "https://www.council.jeju.kr/",
+      "live_page": "https://www.council.jeju.kr/onair/onair.do",
+      "vendor": "webpot",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "수원특례시의회",
+      "region": "경기시군",
+      "homepage": "https://council.suwon.go.kr/",
+      "live_page": "https://council.suwon.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "고양특례시의회",
+      "region": "경기시군",
+      "homepage": "https://www.goyangcouncil.go.kr/",
+      "live_page": "https://www.goyangcouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "용인특례시의회",
+      "region": "경기시군",
+      "homepage": "https://council.yongin.go.kr/",
+      "live_page": "https://council.yongin.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "성남시의회",
+      "region": "경기시군",
+      "homepage": "https://www.sncouncil.go.kr/",
+      "live_page": "https://cast.sncouncil.go.kr/live/live_list.jsp",
+      "vendor": "jsp",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "부천시의회",
+      "region": "경기시군",
+      "homepage": "https://council.bucheon.go.kr/",
+      "live_page": "https://council.bucheon.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "화성특례시의회",
+      "region": "경기시군",
+      "homepage": "https://council.hscity.go.kr/",
+      "live_page": "https://council.hscity.go.kr/cnts/ibs/onair.html?bbsCd=ibs&bbsSubCd=ibs0101",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "안산시의회",
+      "region": "경기시군",
+      "homepage": "https://www.ansan.go.kr/",
+      "live_page": "https://vod.ansan.go.kr/onair/onair.do",
+      "vendor": "webpot",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "남양주시의회",
+      "region": "경기시군",
+      "homepage": "https://www.nyjc.go.kr/",
+      "live_page": "https://www.nyjc.go.kr/css/broadcast.css?ver=1.825",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "안양시의회",
+      "region": "경기시군",
+      "homepage": "https://www.aycouncil.go.kr/",
+      "live_page": "https://www.aycouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "평택시의회",
+      "region": "경기시군",
+      "homepage": "https://www.ptcouncil.go.kr/",
+      "live_page": "https://www.ptcouncil.go.kr/coun/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "시흥시의회",
+      "region": "경기시군",
+      "homepage": "https://www.siheungcouncil.go.kr/",
+      "live_page": "https://livecouncil.siheung.go.kr/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "파주시의회",
+      "region": "경기시군",
+      "homepage": "https://www.pajucouncil.go.kr/",
+      "live_page": "https://www.pajucouncil.go.kr/broadcast/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "의정부시의회",
+      "region": "경기시군",
+      "homepage": "https://www.ujbcl.go.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    },
+    {
+      "name": "김포시의회",
+      "region": "경기시군",
+      "homepage": "https://www.gimpocouncil.go.kr/",
+      "live_page": "https://www.gimpocouncil.go.kr/css/broadcast.css?ver=20260907",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "광주시의회",
+      "region": "경기시군",
+      "homepage": "https://www.gjcouncil.go.kr/",
+      "live_page": "https://www.gjcouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "광명시의회",
+      "region": "경기시군",
+      "homepage": "https://council.gm.go.kr/",
+      "live_page": "https://council.gm.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "군포시의회",
+      "region": "경기시군",
+      "homepage": "https://www.gunpocouncil.go.kr/",
+      "live_page": "https://www.gunpocouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "하남시의회",
+      "region": "경기시군",
+      "homepage": "https://council.hanam.go.kr/",
+      "live_page": "http://counciltv.hanam.go.kr/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "페이지에 영상 주소가 보입니다 — 자동 찾기가 바로 잡습니다"
+    },
+    {
+      "name": "오산시의회",
+      "region": "경기시군",
+      "homepage": "https://www.osancouncil.go.kr/",
+      "live_page": "https://www.osancouncil.go.kr/cast/live",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "양주시의회",
+      "region": "경기시군",
+      "homepage": "https://yjcc.yangju.go.kr/",
+      "live_page": "https://live.yangju.go.kr/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "페이지에 영상 주소가 보입니다 — 자동 찾기가 바로 잡습니다"
+    },
+    {
+      "name": "이천시의회",
+      "region": "경기시군",
+      "homepage": "https://council.icheon.go.kr/",
+      "live_page": "https://council.icheon.go.kr/broadcast/",
+      "vendor": "etc",
+      "http_status": 200,
+      "note": "페이지에 영상 주소가 보입니다 — 자동 찾기가 바로 잡습니다"
+    },
+    {
+      "name": "구리시의회",
+      "region": "경기시군",
+      "homepage": "https://www.gcc.or.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    },
+    {
+      "name": "안성시의회",
+      "region": "경기시군",
+      "homepage": "https://www.anseongcl.go.kr/",
+      "live_page": "https://www.anseongcl.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "포천시의회",
+      "region": "경기시군",
+      "homepage": "https://council.pocheon.go.kr/",
+      "live_page": "https://council.pocheon.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "의왕시의회",
+      "region": "경기시군",
+      "homepage": "https://council.uiwang.go.kr/",
+      "live_page": "https://council.uiwang.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "양평군의회",
+      "region": "경기시군",
+      "homepage": "https://www.ypcouncil.go.kr/",
+      "live_page": "https://www.ypcouncil.go.kr/assembly/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": "홈페이지의 인터넷방송 링크에서 찾았습니다"
+    },
+    {
+      "name": "여주시의회",
+      "region": "경기시군",
+      "homepage": "https://www.yeojucouncil.go.kr/",
+      "live_page": "https://www.yeojucouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "동두천시의회",
+      "region": "경기시군",
+      "homepage": "https://council.ddc.go.kr/",
+      "live_page": "https://council.ddc.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "과천시의회",
+      "region": "경기시군",
+      "homepage": "https://www.gccouncil.go.kr/",
+      "live_page": "https://www.gccouncil.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "가평군의회",
+      "region": "경기시군",
+      "homepage": "https://www.gpassem.go.kr/",
+      "live_page": "https://www.gpassem.go.kr/kr/cast/live.do",
+      "vendor": "cast-do",
+      "http_status": 200,
+      "note": ""
+    },
+    {
+      "name": "연천군의회",
+      "region": "경기시군",
+      "homepage": "https://www.yca21.go.kr/",
+      "live_page": null,
+      "vendor": null,
+      "http_status": null,
+      "note": "생중계 페이지를 자동으로 찾지 못했습니다 — 주소를 직접 넣어 주세요"
+    }
+  ]
+}

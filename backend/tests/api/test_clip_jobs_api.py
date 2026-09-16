@@ -283,6 +283,35 @@ class TestStatusAndDownload:
         r = client.get(f"{JOBS_URL}/{job_id}/download", params={"file": "../secret"}, headers=_token(STAFF_USER))
         assert r.status_code == 404   # files[] 에 없는 이름은 존재 여부와 무관하게 404
 
+    def test_thumbnail_guards(self, client, repo, monkeypatch):
+        """썸네일은 다운로드와 같은 문을 쓴다 — 남의 잡 404 · 목록 밖 404 · srt 400 · 미완료 404."""
+        job_id = _seed_done(repo, files=[{"name": "클립.mp4", "kind": "mp4", "bytes": 4},
+                                         {"name": "클립.srt", "kind": "srt", "bytes": 1}])
+        url = f"{JOBS_URL}/{job_id}/thumbnail"
+        assert client.get(url, params={"file": "클립.mp4"}, headers=_token(OTHER_USER)).status_code == 404
+        assert client.get(url, params={"file": "없는.mp4"}, headers=_token(STAFF_USER)).status_code == 404
+        assert client.get(url, params={"file": "클립.srt"}, headers=_token(STAFF_USER)).status_code == 400
+        q = _seed_done(repo, status="queued", files=[{"name": "클립.mp4", "kind": "mp4", "bytes": 4}])
+        assert client.get(f"{JOBS_URL}/{q}/thumbnail", params={"file": "클립.mp4"},
+                          headers=_token(STAFF_USER)).status_code == 404
+
+    def test_thumbnail_serves_cached_jpeg_and_404_when_unmakeable(self, client, repo):
+        """캐시가 있으면 그대로 준다. 못 만들면 404 이고 화면은 자리표시로 떨어진다."""
+        job_id = _seed_done(repo, files=[{"name": "클립.mp4", "kind": "mp4", "bytes": 4}])
+        d = clip_store.job_dir(job_id); d.mkdir(parents=True)
+        (d / "클립.mp4").write_bytes(b"MP4!")   # ffmpeg 가 프레임을 못 뽑는 가짜 파일
+        url = f"{JOBS_URL}/{job_id}/thumbnail"
+        # 캐시를 미리 놓아 두면 ffmpeg 를 부르지 않는다
+        clip_store.thumb_path(job_id, 0).write_bytes(b"\xff\xd8JPEG")
+        r = client.get(url, params={"file": "클립.mp4"}, headers=_token(STAFF_USER))
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/jpeg"
+        assert r.headers["cache-control"] == "private, max-age=86400"
+        # 썸네일은 files[] 에 섞이지 않는다 — 섞이면 다운로드 버튼 목록에 나온다
+        data = client.get(f"{JOBS_URL}/{job_id}", headers=_token(STAFF_USER)).json()
+        assert [f["name"] for f in data["files"]] == ["클립.mp4"]
+        assert list(data["download_urls"]) == ["클립.mp4"]
+
     def test_delete_done_evicts_manual(self, client, repo):
         job_id = _seed_done(repo, files=[{"name": "a.mp4", "kind": "mp4", "bytes": 1}])
         r = client.delete(f"{JOBS_URL}/{job_id}", headers=_token(STAFF_USER))

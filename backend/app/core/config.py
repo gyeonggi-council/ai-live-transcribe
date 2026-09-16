@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # 09-03 에 "상한부 자동(매일 새벽 1회)" 으로, 09-10 에 "VOD 가 등록되면 바로" 로 바꿨다 —
     # 새벽 1회라 아침에 붙은 VOD 가 다음 날까지 22시간 기다렸다. 등록 루프가 한 바퀴 돌 때마다
     # services/vod_auto_stt.kick 이 생성한다. 하루 상한·최근 N일·속기 검토본 보존이 그 가드다.
-    # 회의당 약 $0.4·10분. 상한 10건 = 하루 최대 $4, 월 최대 $120 (OpenAI 월 하드리밋 $500 안).
+    # 회의당 약 $0.4·10분. 상한 10건 = 하루 최대 $4, 월 최대 $120 — OpenAI 월 하드리밋 안에 든다.
     vod_auto_stt_enabled: bool = True
     # 하루(KST) 최대 생성 건수 — 넘치는 회의는 다음 날로 밀린다(max_age_days 안이면 잡힌다).
     vod_auto_stt_daily_limit: int = 10
@@ -311,6 +311,34 @@ class Settings(BaseSettings):
     # 호명 이름 ↔ 위원회 명부 퍼지 매칭 임계값 (difflib ratio, 후보 ~15명이라 0.6 견고)
     cue_match_threshold: float = 0.6
 
+    # ─── 얼굴로 의원 찾기 (2026-09-16) ──────────────────────────────────────
+    # 영상 화면의 얼굴을 공식 사진 명부와 맞춰 이름을 붙인다(SCRFD 검출 + ArcFace 임베딩,
+    # 모델은 Dockerfile 이 sha256 핀으로 굽는다). 임계값 정본과 실측 근거는
+    # docs/face-recognition-eval-2026-09.md.
+    face_recognition_enabled: bool = True
+    face_det_model_path: str = "models/face/det_10g.onnx"
+    face_rec_model_path: str = "models/face/w600k_r50.onnx"
+    face_threads: int = 1              # 라이브 STT 와 CPU 를 나눈다
+    face_det_size: int = 640           # 검출 입력 한 변
+    face_det_threshold: float = 0.5    # 얼굴 검출 점수 하한
+    face_max_faces: int = 12
+    face_min_px: int = 48              # 이보다 작은 얼굴엔 이름을 붙이지 않는다
+    # 판정 임계값 — 후보를 위원회로 좁혔을 때(accept)와 전체 명부일 때(accept_open).
+    # 실측(2026-09-16 ch60): 본인 0.49~0.62 · 의원이 아닌 사람 최고 0.34.
+    face_cos_accept: float = 0.42
+    face_cos_accept_open: float = 0.46
+    face_cos_margin: float = 0.06      # 1등과 2등의 차이가 이보다 작으면 이름을 안 붙인다
+    face_hint_relief: float = 0.06     # 지금 발언자와 같은 이름이면 이만큼 완화
+    face_gallery_ttl_seconds: int = 300
+    face_frame_cache_seconds: float = 2.0
+    # 현장 템플릿 자동 등록 — 아주 확신할 때만. 잘못 담기면 그 이름이 계속 틀린다.
+    face_auto_enroll: bool = True
+    face_enroll_min_score: float = 0.55
+    face_enroll_min_px: int = 70
+    face_enroll_min_det: float = 0.85
+    face_max_video_templates: int = 5
+    face_min_interval_seconds: float = 1.2   # 같은 사용자 연타 차단
+
     # 배치 교정 (관리자가 트리거하는 일회성 AI 문법/용어 검사) — grammar_checker가 사용. 유지.
     # 저지연보다 품질 우선 → flagship 모델 사용.
     batch_correction_model: str = "gpt-5.4"
@@ -406,6 +434,52 @@ class Settings(BaseSettings):
     # 터널 과부하 재발 시 환경변수 CHANNEL_SSE_ENABLED=false 로 즉시 차단 가능
     # (프론트는 404 시 30초 폴링으로 자동 폴백).
     channel_sse_enabled: bool = True
+
+    # ─── 기관(테넌트) 설정 — 다른 의회가 쓰려면 이 값만 바꾼다 (2026-09-16) ──────────
+    # 기본값은 전부 **경기도의회의 현재 값**이라 이 릴리스는 동작이 바뀌지 않는다.
+    # 값을 비우면 그 기능이 조용히 꺼진다(판정은 core/features.py 한 곳에서 한다).
+    # ⚠ 기본값을 비우기 전에 **운영 매니페스트에 값을 먼저 명시**한다 —
+    #   k8s/ggc-live-transcribe.yaml 에 GGC_LOGIN_BASE_URL 이 없어서, 그 기본값을 먼저 비우면
+    #   경기도 QR 로그인이 즉시 503 이 되고 이 서비스에는 아이디 로그인이 없다(= 아무도 못 들어온다).
+    org_name: str = "경기도의회"
+    kms_base_url: str = "https://kms.ggc.go.kr"
+    council_calendar_url: str = "https://www.ggc.go.kr/site/main/schedule/list/{date}/ALL"
+    councilor_api_base_url: str = "https://www.ggc.go.kr/site/main/api/portaltoggc/"
+    council_onair_api_url: str = "https://live.ggc.go.kr/getOnairListTodayData.do"
+
+    # ─── 채널 저장소 (2026-09-16) ─────────────────────────────────────────────
+    # "db"   = subtitle.channels 표를 읽는다(기본). 관리자 화면에서 채널을 등록·수정한다.
+    # "seed" = 표를 아예 안 본다 — 전환 사고 시 파드 env 하나로 되돌리는 킬스위치.
+    channels_source: str = "db"
+    channels_cache_ttl_seconds: int = 60
+    # DB 를 못 읽을 때 코드 시드(SEED_CHANNELS)로 버틸지.
+    # 다른 기관 배포에서는 false 로 둔다 — 경기도 채널 18개가 잘못 뜨면 안 된다.
+    channels_seed_fallback: bool = True
+
+    # ─── 방송상태 제공자 (2026-09-16) ────────────────────────────────────────
+    # 채널마다 status_provider 로 정하고, 비어 있으면 이 기본값을 쓴다.
+    #   ggc    = 경기도의회 생중계 API (기존 동작)
+    #   probe  = m3u8 을 직접 받아 세그먼트가 늘면 방송중 (기관 중립 — 다른 의회의 기본)
+    #   manual = 관리자가 켜고 끈다 (자동 감지가 안 되는 곳)
+    default_status_provider: str = "ggc"
+    probe_interval_seconds: int = 20
+    probe_stale_seconds: int = 60       # 이만큼 세그먼트가 안 늘면 정회중(2)
+    probe_off_seconds: int = 300        # 이만큼이면 종료(3)
+    probe_concurrency: int = 5
+    probe_timeout_seconds: float = 5.0
+
+    # 등록된 채널의 호스트 외에 추가로 허용할 스트림 호스트 (콤마 구분)
+    extra_stream_hosts: str = ""
+
+    # 생중계 페이지 → 영상 주소 자동 탐지 (관리자 전용)
+    discovery_enabled: bool = True
+    discovery_max_bytes: int = 2_000_000
+    discovery_timeout_seconds: float = 8.0
+
+    # DB 백엔드 선택자. core/postgres.py:is_postgres_backend() 가 읽는데 필드가 없어서
+    # 그 경로가 배선되는 순간 AttributeError 가 날 자리였다(호출자 미배선이라 지금은 안 터진다).
+    # 값은 운영 매니페스트(DB_BACKEND=supabase)와 같다 — 동작 변화 없음.
+    db_backend: str = "supabase"
 
     # 서버
     debug: bool = False

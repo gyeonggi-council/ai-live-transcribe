@@ -15,6 +15,20 @@ from app.services.auth_service import create_access_token
 
 
 # ---------------------------------------------------------------------------
+# 채널 스냅샷 — 채널 목록이 DB(subtitle.channels)에서 오므로, 테스트에서는
+# 코드 시드를 캐시에 직접 심어 준다. 이게 없으면 채널을 쓰는 테스트 14건 이상이
+# "채널을 못 찾음" 으로 무더기 실패하고, 원인이 캐시 미초기화인지 로직인지 안 보인다.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def channels_seeded():
+    from app.core import channels as _channels
+
+    _channels._install_snapshot(_channels.SEED_CHANNELS, source="seed")
+    yield
+    _channels.reset_channels_cache()
+
+
+# ---------------------------------------------------------------------------
 # 테스트용 관리자 계정 (인가가 필요한 엔드포인트 테스트용)
 # ---------------------------------------------------------------------------
 TEST_ADMIN_USER_ID = "00000000-0000-0000-0000-000000000001"

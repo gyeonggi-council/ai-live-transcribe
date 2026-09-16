@@ -107,3 +107,43 @@ class TestSyncStatus:
         data = response.json()
         assert "last_synced_at" in data
         assert "active_count" in data
+
+
+# ─── 사진 프록시 (2026-09-16) ────────────────────────────────────────────────
+def test_photo_cache_dir_is_writable_path():
+    """캐시 자리는 **쓸 수 있는 곳**이어야 한다.
+
+    컨테이너 루트가 readOnlyRootFilesystem 이라 예전 자리(/app/data/photo_cache)는
+    `[Errno 30] Read-only file system` 으로 전 요청이 500 이었다(2026-09-16 운영).
+    """
+    from app.api import councilors as mod
+
+    assert not mod._PHOTO_CACHE_DIR.startswith("/app/data"), mod._PHOTO_CACHE_DIR
+    assert mod._PHOTO_CACHE_DIR.startswith("/tmp") or "PHOTO_CACHE_DIR" in mod.os.environ
+
+
+def test_bad_uuid_becomes_404_not_500():
+    """PostgREST 의 22P02("uuid 가 아니다")는 404 여야 한다.
+
+    빈 id 로 만들어진 주소(`/api/councilors//photo` → id 가 "photo")가 500 으로 보이면
+    운영 오류 로그가 진짜 오류와 섞인다(2026-09-16 실측).
+    """
+    from fastapi import HTTPException
+
+    from app.api.councilors import _not_found_if_bad_id
+
+    class _ApiError(Exception):
+        def __init__(self, payload):
+            super().__init__(payload)
+            self.code = payload.get("code")
+
+    for exc in (
+        _ApiError({"message": 'invalid input syntax for type uuid: "photo"', "code": "22P02"}),
+        Exception('invalid input syntax for type uuid: "detail"'),
+    ):
+        with pytest.raises(HTTPException) as caught:
+            _not_found_if_bad_id(exc)
+        assert caught.value.status_code == 404
+
+    # 다른 오류는 그대로 통과시킨다 — 삼켜서 404 로 위장하면 진짜 고장을 못 본다
+    _not_found_if_bad_id(Exception("connection refused"))

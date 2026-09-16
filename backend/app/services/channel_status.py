@@ -13,11 +13,14 @@ from typing import Optional
 
 import httpx
 
-from app.core.channels import CHANNELS, get_status_text, get_stream_override
+from app.core.channels import get_all_channels, get_status_text, get_stream_override
+from app.core.config import settings
+from app.services.channel_status_providers import get_provider, group_by_provider
 
 logger = logging.getLogger(__name__)
 
-ONAIR_API_URL = "https://live.ggc.go.kr/getOnairListTodayData.do"
+# 하위호환 — assembly_schedule_sync 가 이 이름을 import 한다. 값의 정본은 설정이다.
+ONAIR_API_URL = settings.council_onair_api_url
 CACHE_TTL_SECONDS = 5
 
 
@@ -25,12 +28,13 @@ class ChannelStatusService:
     """채널 방송 상태를 관리하는 싱글턴 서비스."""
 
     def __init__(self) -> None:
-        # adCode → livestatus 매핑 (현재 상태)
+        # channel_id → livestatus (정본). 코드가 없는 채널도 여기엔 있다.
+        self._status_by_id: dict[str, int] = {}
+        self._schedule_by_id: dict[str, dict] = {}
+        self._prev_status_by_id: dict[str, int] = {}
+        # adCode → livestatus / 일정 (옛 계약 유지용 뷰)
         self._status: dict[str, int] = {}
-        # adCode → 일정 정보 (회차, 차수)
         self._schedule: dict[str, dict] = {}
-        # 이전 상태 (변경 감지용)
-        self._prev_status: dict[str, int] = {}
         # 캐시 타임스탬프
         self._last_fetched: float = 0.0
         # 동시 fetch 방지 락
@@ -39,79 +43,94 @@ class ChannelStatusService:
         self._subscribers: list[asyncio.Queue] = []
 
     async def fetch_status(self) -> dict[str, int]:
-        """외부 API에서 방송 상태를 가져옵니다 (캐시 적용)."""
+        """방송 상태를 가져옵니다 (캐시 적용).
+
+        ⚠ **반환 키는 지금까지처럼 채널 코드(adCode)다.** 채널 ID 로 바꾸면
+        `auto_stt` 의 `status_map.get(code, 0)` 이 전부 0 을 돌려주고 — 예외 없이 —
+        STT 가 영영 시작되지 않는다. 채널 ID 로 받으려면 `get_status_map_by_id()`.
+        """
         now = time.monotonic()
-        if now - self._last_fetched < CACHE_TTL_SECONDS and self._status:
+        if now - self._last_fetched < CACHE_TTL_SECONDS and self._status_by_id:
             return self._status
 
         async with self._lock:
-            # 락 획득 후 다시 확인 (다른 코루틴이 이미 fetch 했을 수 있음)
             now = time.monotonic()
-            if now - self._last_fetched < CACHE_TTL_SECONDS and self._status:
+            if now - self._last_fetched < CACHE_TTL_SECONDS and self._status_by_id:
                 return self._status
 
-            self._prev_status = dict(self._status)
-            try:
-                ymd = datetime.now().strftime("%Y-%m-%d")
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(
-                        ONAIR_API_URL,
-                        data={"ymd": ymd},
-                        headers={
-                            "Referer": "https://live.ggc.go.kr/",
-                            "Content-Type": "application/x-www-form-urlencoded",
-                            "X-Requested-With": "XMLHttpRequest",
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                            "Accept": "application/json, text/javascript, */*; q=0.01",
-                        },
-                    )
-                    resp.raise_for_status()
-                    # HTML 에러 페이지 감지: JSON 파싱 시도로 검증
-                    data = resp.json()
+            self._prev_status_by_id = dict(self._status_by_id)
+            channels = get_all_channels()
+            merged: dict[str, int] = {}
+            merged_schedule: dict[str, dict] = {}
+            failed = False
 
-                new_status: dict[str, int] = {}
-                new_schedule: dict[str, dict] = {}
-                for item in data:
-                    ad_code = item.get("adCode", "")
-                    live_status = item.get("kmsLivestatus", 0)
-                    if ad_code:
-                        new_status[ad_code] = live_status
-                        new_schedule[ad_code] = {
-                            "session_no": item.get("adTh", 0),
-                            "session_order": item.get("adCha", 0),
-                        }
+            for provider_name, group in group_by_provider(channels).items():
+                provider = get_provider(provider_name)
+                if provider is None:
+                    continue
+                try:
+                    merged.update(await provider.poll(group))
+                    merged_schedule.update(await provider.schedules(group))
+                except Exception as exc:              # noqa: BLE001
+                    failed = True
+                    logger.warning("방송 상태 조회 실패(%s): %s", provider_name, exc)
 
-                self._status = new_status
-                self._schedule = new_schedule
-                self._last_fetched = time.monotonic()
-
-                # 변경 감지 → 구독자에게 알림
-                changes = self._detect_changes()
-                if changes:
-                    await self._notify_subscribers(changes)
-
-            except Exception as e:
-                logger.warning("방송 상태 조회 실패: %s", e)
-                # 실패 시 기존 캐시 유지, TTL만 짧게 재시도
+            if failed and not merged:
+                # 전부 실패했으면 기존 캐시를 유지하고 짧게 재시도한다.
                 self._last_fetched = time.monotonic() - (CACHE_TTL_SECONDS - 1)
+                return self._status
+
+            by_id = {ch["id"]: ch for ch in channels}
+            self._status_by_id = merged
+            self._schedule_by_id = merged_schedule
+            # 코드 키 뷰 — 옛 계약을 그대로 유지한다
+            self._status = {
+                by_id[cid]["code"]: st
+                for cid, st in merged.items()
+                if by_id.get(cid) and by_id[cid].get("code")
+            }
+            self._schedule = {
+                by_id[cid]["code"]: sc
+                for cid, sc in merged_schedule.items()
+                if by_id.get(cid) and by_id[cid].get("code")
+            }
+            self._last_fetched = time.monotonic()
+
+            changes = self._detect_changes()
+            if changes:
+                await self._notify_subscribers(changes)
 
         return self._status
 
+    async def get_status_map_by_id(self) -> dict[str, int]:
+        """{channel_id: livestatus} — 코드가 없는 채널(기관 중립 제공자)도 포함한다."""
+        await self.fetch_status()
+        return dict(self._status_by_id)
+
     def _detect_changes(self) -> list[dict]:
-        """이전 상태와 비교하여 변경된 채널 목록을 반환합니다."""
+        """이전 상태와 비교하여 변경된 채널 목록을 반환합니다.
+
+        이벤트에 `channel_id` 를 **추가**하고 `code` 는 남긴다 — 코드가 없는 채널
+        (기관 중립 제공자)도 변경 알림을 받아야 하고, 옛 구독자는 code 를 읽는다.
+        """
+        from app.core.channels import get_channel
+
         changes = []
-        all_codes = set(self._status.keys()) | set(self._prev_status.keys())
-        for code in all_codes:
-            old = self._prev_status.get(code)
-            new = self._status.get(code)
-            if old != new:
-                changes.append({
-                    "code": code,
-                    "old_status": old,
-                    "new_status": new,
-                    "old_text": get_status_text(old) if old is not None else None,
-                    "new_text": get_status_text(new) if new is not None else None,
-                })
+        all_ids = set(self._status_by_id) | set(self._prev_status_by_id)
+        for cid in all_ids:
+            old = self._prev_status_by_id.get(cid)
+            new = self._status_by_id.get(cid)
+            if old == new:
+                continue
+            ch = get_channel(cid) or {}
+            changes.append({
+                "channel_id": cid,
+                "code": ch.get("code") or "",
+                "old_status": old,
+                "new_status": new,
+                "old_text": get_status_text(old) if old is not None else None,
+                "new_text": get_status_text(new) if new is not None else None,
+            })
         return changes
 
     async def _notify_subscribers(self, changes: list[dict]) -> None:
@@ -157,13 +176,13 @@ class ChannelStatusService:
         # 자막 WS 룸 연결 수 = 채널별 현재 시청자 수 (lazy import — 순환 참조 회피)
         from app.api.websocket import manager as ws_manager
 
-        status_map = await self.fetch_status()
+        status_map = await self.get_status_map_by_id()
         result = []
-        for ch in CHANNELS:
-            code = ch["code"]
-            livestatus = status_map.get(code, 0)
-            schedule = self._schedule.get(code, {})
-            has_schedule = code in self._schedule
+        for ch in get_all_channels():
+            channel_id = ch["id"]
+            livestatus = status_map.get(channel_id, 0)
+            schedule = self._schedule_by_id.get(channel_id, {})
+            has_schedule = channel_id in self._schedule_by_id
             entry = {
                 **ch,
                 "livestatus": livestatus,

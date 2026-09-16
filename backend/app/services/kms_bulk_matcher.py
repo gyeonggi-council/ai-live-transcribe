@@ -25,14 +25,15 @@ from typing import Any, Iterable
 import httpx
 from supabase import Client
 
+from app.core.config import settings
 from app.services.grammar_checker import check_grammar_batch
 from app.services.kms_vod_resolver import VodNotConvertedError, resolve_kms_vod_url
 from app.services.vod_stt_service import VodSttService, is_processing
 
 logger = logging.getLogger(__name__)
 
-KMS_LIST_URL = "https://kms.ggc.go.kr/caster/content/vms/VodLatelyList.do?confcode=N"
-KMS_HOST = "https://kms.ggc.go.kr"
+KMS_LIST_URL = f"{settings.kms_base_url.rstrip('/')}/caster/content/vms/VodLatelyList.do?confcode=N"
+KMS_HOST = settings.kms_base_url.rstrip("/")
 
 # <tr> 블록 내에서 각 필드를 추출하는 정규식
 _ROW_REGEX = re.compile(r"<tr>(.*?)</tr>", re.DOTALL)

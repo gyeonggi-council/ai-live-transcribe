@@ -44,6 +44,12 @@ ESTIMATE_MAX_ANCHORS = 400
 # 직전 기준점의 선형 연장과 이만큼도 어긋나지 않으면 새 기준점을 만들지 않는다(응답 다이어트)
 ESTIMATE_MIN_DRIFT_SEC = 3.0
 
+# 저장된 기준점이 이보다 늦게 시작하면 그 앞 구간은 덮이지 않은 것으로 본다.
+# 기준점은 세션 첫 PCM 에서 남으므로 정상 회의는 0 근처에서 시작한다. 늦게 시작하는 경우는
+# **회의 도중에 이 기능이 배포된 회의**뿐인데, 그때 앞 구간을 첫 기준점에서 거꾸로 늘리면
+# 그 사이의 정회(점심 등)를 건너뛰어 오전 장면이 통째로 틀린다 — 앞 구간은 추정으로 채운다.
+ANCHOR_COVERAGE_START_SEC = 120.0
+
 
 def _parse_ts(value: object) -> Optional[datetime]:
     """PostgREST 타임스탬프 문자열 → tz-aware datetime. 못 읽으면 None."""
@@ -180,10 +186,18 @@ def estimate_anchors(supabase, meeting_id: str) -> list[dict]:
 
 
 def anchors_for_meeting(supabase, meeting_id: str) -> tuple[list[dict], str]:
-    """(기준점 목록, 출처). 출처: recorded(정확) / estimated(±10초) / none."""
+    """(기준점 목록, 출처). 출처: recorded(정확) / mixed / estimated(±10초) / none.
+
+    mixed 는 "뒤는 정확하고 앞은 추정" 이다 — 회의 도중에 이 기능이 배포된 회의에서만 난다.
+    화면은 recorded 가 아닌 출처에 "약" 을 붙여 근사임을 드러낸다.
+    """
     recorded = get_recorded_anchors(supabase, meeting_id)
     if recorded:
-        return recorded, "recorded"
+        first = float(recorded[0]["clock"])
+        if first <= ANCHOR_COVERAGE_START_SEC:
+            return recorded, "recorded"
+        head = [a for a in estimate_anchors(supabase, meeting_id) if a["clock"] < first]
+        return (head + recorded, "mixed") if head else (recorded, "recorded")
     estimated = estimate_anchors(supabase, meeting_id)
     if estimated:
         return estimated, "estimated"

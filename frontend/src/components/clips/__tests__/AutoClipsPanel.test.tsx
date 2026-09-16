@@ -18,9 +18,15 @@ jest.mock('@/hooks/useAutoClips', () => ({
 }));
 
 const mockDownload = jest.fn();
+const mockFetchFile = jest.fn();
+const mockSaveBlob = jest.fn();
 jest.mock('@/lib/api', () => ({
   __esModule: true,
   downloadClipJobFile: (...args: unknown[]) => mockDownload(...args),
+  fetchClipJobFile: (...args: unknown[]) => mockFetchFile(...args),
+  saveBlob: (...args: unknown[]) => mockSaveBlob(...args),
+  // 썸네일은 화면에 들어올 때만 받는다 — jsdom 에는 IntersectionObserver 가 없어 바로 부른다
+  fetchClipThumb: jest.fn().mockResolvedValue(null),
 }));
 
 function job(over: Partial<ClipJobType> = {}): ClipJobType {
@@ -65,6 +71,8 @@ function job(over: Partial<ClipJobType> = {}): ClipJobType {
 beforeEach(() => {
   mockJobs = [];
   mockDownload.mockReset().mockResolvedValue(undefined);
+  mockFetchFile.mockReset().mockResolvedValue({ blob: new Blob(['x']), filename: 'x.mp4' });
+  mockSaveBlob.mockReset();
   mockUseAutoClips.mockReset();
 });
 
@@ -82,12 +90,42 @@ describe('AutoClipsPanel', () => {
     expect(screen.getByTestId('auto-clips-notice')).toHaveTextContent('공유하기 전에 한 번 재생');
     expect(screen.getAllByTestId('auto-clip-job')).toHaveLength(1);          // 고른 의원 것만
     expect(screen.getByText('#2')).toBeInTheDocument();                      // 파일 이름 끝 번호와 같은 값
+    // 워크벤치 안에서만 나오는 "원본에서 보기" — 영상을 그 구간으로 옮긴다
     fireEvent.click(screen.getAllByTestId('auto-clip-preview')[1]);
     expect(onPreview).toHaveBeenCalledWith(11490);
-    fireEvent.click(screen.getAllByTestId('auto-clip-download')[0]);
+    fireEvent.click(screen.getAllByTestId('clip-file-download')[0]);
     await waitFor(() =>
       expect(mockDownload).toHaveBeenCalledWith('m1', 'j1', '김태희_제393회 제3차 도시환경위원회_2.mp4')
     );
+  });
+
+  it('추출을 요청한 시각을 보여준다 (2026-09-16 사용자 요청)', () => {
+    mockJobs = [job()];
+    render(<AutoClipsPanel meetingId="m1" speakerName="김태희" />);
+    const times = screen.getByTestId('clip-requested-at');
+    expect(times).toHaveTextContent('요청');
+    expect(times).toHaveTextContent('완료');
+  });
+
+  it('클립마다 썸네일 자리와 「재생 확인」 버튼이 있다', () => {
+    mockJobs = [job()];
+    render(<AutoClipsPanel meetingId="m1" speakerName="김태희" />);
+    expect(screen.getAllByTestId('clip-thumb')).toHaveLength(2);             // mp4 2개
+    expect(screen.getAllByTestId('clip-file-check')).toHaveLength(2);
+  });
+
+  it('「재생 확인」 → 그 파일을 받아 모달에서 재생하고, 「이 파일 받기」는 다시 받지 않는다', async () => {
+    mockJobs = [job()];
+    render(<AutoClipsPanel meetingId="m1" speakerName="김태희" />);
+    fireEvent.click(screen.getAllByTestId('clip-file-check')[0]);
+    await waitFor(() => expect(screen.getByTestId('clip-preview-video')).toBeInTheDocument());
+    expect(mockFetchFile).toHaveBeenCalledWith(
+      'm1', 'j1', '김태희_제393회 제3차 도시환경위원회_2.mp4', expect.any(Function), expect.any(AbortSignal)
+    );
+    fireEvent.click(screen.getByTestId('clip-preview-save'));
+    expect(mockSaveBlob).toHaveBeenCalledTimes(1);
+    expect(mockFetchFile).toHaveBeenCalledTimes(1);                          // 두 번 받지 않는다
+    expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('전부 받기는 mp4 를 하나씩 차례로 받는다', async () => {
@@ -111,7 +149,7 @@ describe('AutoClipsPanel', () => {
     mockJobs = [job({ status: 'running', progress: 0.5, current_segment: 1, files: [] })];
     render(<AutoClipsPanel meetingId="m1" speakerName="김태희" />);
     expect(screen.getByTestId('auto-clip-status')).toHaveTextContent('자르는 중 1/2');
-    expect(screen.queryByTestId('auto-clip-download')).toBeNull();
+    expect(screen.queryByTestId('clip-file-download')).toBeNull();
   });
 
   it('최근 목록은 회의별로 묶는다', () => {

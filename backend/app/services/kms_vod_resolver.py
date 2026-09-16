@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,8 +33,10 @@ class VodNotConvertedError(ValueError):
     """
 
 
-KMS_HOST = "https://kms.ggc.go.kr"
-KMS_VOD_VIEWER_PATTERN = "kms.ggc.go.kr/caster/player/vodViewer.do"
+# 기관 영상관리시스템 주소. 기본값은 경기도의회 KMS 라 동작이 바뀌지 않는다.
+# 다른 기관은 KMS_BASE_URL 로 바꾸고, 그 시스템이 없으면 비운다(관련 기능이 통째로 꺼진다).
+KMS_HOST = settings.kms_base_url.rstrip("/")
+KMS_VOD_VIEWER_PATTERN = f"{urlparse(KMS_HOST).hostname or ''}/caster/player/vodViewer.do"
 
 # ★2026-07-21 경기도 보안정책 변경: 특정 비브라우저 UA(curl 등)의 KMS 요청이
 #   차단 페이지(text/html)로 대체되고, mp4 직접 전송은 연결당 ~300KB/s로
@@ -44,10 +48,10 @@ KMS_BROWSER_HEADERS = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://kms.ggc.go.kr/",
+    "Referer": f"{KMS_HOST}/",
 }
 # Anonymous VOD 등록 허용 도메인 (경기도의회 공식 KMS 호스트만)
-ALLOWED_VOD_HOSTS = frozenset({"kms.ggc.go.kr"})
+ALLOWED_VOD_HOSTS = frozenset({urlparse(KMS_HOST).hostname or ""})
 ALLOWED_VOD_SCHEMES = frozenset({"https"})
 MP4FILE_REGEX = re.compile(r'var\s+mp4file\s*=\s*"([^"]+)"')
 VODTITLE_REGEX = re.compile(r'var\s+vodtitle\s*=\s*"([^"]+)"')

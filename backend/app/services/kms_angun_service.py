@@ -28,7 +28,7 @@ from app.services.kms_vod_resolver import KMS_BROWSER_HEADERS
 
 logger = logging.getLogger(__name__)
 
-KMS_BASE = "https://kms.ggc.go.kr"
+KMS_BASE = settings.kms_base_url.rstrip("/")
 ANGUN_URL = KMS_BASE + "/caster/player/listAngunXhr.do?midx={midx}"
 MEMBER_URL = KMS_BASE + "/pxdo/member_info.xdo?mcode={mcode}&daesu={daesu}"
 DAESU_CHAIN = ("12", "11")

@@ -17,6 +17,7 @@ import CommitteeMembersModal from '../../components/CommitteeMembersModal';
 import HlsPlayer, { LIVE_SYNC_TARGET_SEC } from '../../components/HlsPlayer';
 import CurrentUtteranceCard from '../../components/live/CurrentUtteranceCard';
 import LiveAgendaPanel from '../../components/live/LiveAgendaPanel';
+import LiveFaceOverlay from '../../components/live/LiveFaceOverlay';
 import LiveViewer from '../../components/live/LiveViewer';
 import MaterialRequestPanel from '../../components/MaterialRequestPanel';
 import SearchInput from '../../components/SearchInput';
@@ -826,11 +827,18 @@ function LivePageContent() {
       </div>
     );
 
-    // 뷰어 모드에도 같은 시각 배지를 얹는다 — LiveViewer 는 이 슬롯을 그대로 채우므로 여기서 감싼다
-    const videoSlotWithClock = (
+    // 뷰어(시민용) 영상 슬롯 위에 얹는 것 둘 — 우상단 실제 시각 배지, 좌상단 [의원 찾기].
+    // 자리가 겹치지 않으므로 한 relative 컨테이너에 함께 둔다.
+    const videoSlotWithOverlays = (
       <div className="relative h-full w-full">
         {videoSlot}
         {!replayMeetingParam && <VideoClockBadge getWallMs={getLiveWallMs} />}
+        <LiveFaceOverlay
+          videoRef={videoRef}
+          channelId={activeChannelId}
+          speakerHint={currentSpeakerName}
+          enabled={isOnAir === true || !!replayVodUrl}
+        />
       </div>
     );
 
@@ -906,7 +914,7 @@ function LivePageContent() {
         {/* 새 GAC 뷰어 */}
         <div className="flex-1 min-h-0">
           <LiveViewer
-            videoSlot={videoSlotWithClock}
+            videoSlot={videoSlotWithOverlays}
             meetingTitle={meeting?.title || activeChannelName || '실시간 회의'}
             sessionLabel={activeChannel?.session_no ? `제${activeChannel.session_no}회` : undefined}
             subtitles={displaySubtitles}
@@ -1214,9 +1222,16 @@ function LivePageContent() {
               </div>
             )}
             {/* 영상 위 자막 오버레이는 두지 않는다 (2026-09-08 사용자 결정) — 자막은 아래 패널 한 곳에서만.
-                시각 배지는 예외다 (2026-09-16 담당자 요청) — 자막이 아니라 "이 장면이 몇 시였나"이고,
-                자막 목록에만 있던 시각을 영상에서도 보이게 한다. */}
+                예외가 둘이다 (2026-09-16 담당자 요청):
+                · 시각 배지 — 자막이 아니라 "이 장면이 몇 시였나"이고, 자막 목록에만 있던 시각을 영상에서도 보인다.
+                · [의원 찾기] — 상시 오버레이가 아니라 **누를 때만** 뜨는 얼굴 인식이다. */}
             {!replayMeetingParam && <VideoClockBadge getWallMs={getLiveWallMs} />}
+            <LiveFaceOverlay
+              videoRef={videoRef}
+              channelId={activeChannelId}
+              speakerHint={latestSubtitle?.speaker}
+              enabled={isOnAir === true || !!replayVodUrl}
+            />
           </div>
 
           {/* PC 전용 — 지금 발언 · 도구 · 의사일정.

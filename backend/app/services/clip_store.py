@@ -68,6 +68,17 @@ def safe_file(job_id: str, name: str) -> Path:
     return path
 
 
+def thumb_path(job_id: str, index: int) -> Path:
+    """클립 썸네일 캐시 경로 — mp4 옆(`jobs/<job_id>/.thumb_NNN.jpg`).
+
+    ★ 잡 디렉터리 **안**에 두는 것이 핵심이다. `remove_job_files()` 가 디렉터리째 지우므로
+      TTL·용량 회수·고아 스윕이 썸네일까지 공짜로 끌고 간다(따로 정리 코드를 만들 필요가 없다).
+    ★ 이름을 `index` 로만 만든다 — 사용자 입력이 경로에 닿지 않는다. 선행 점 때문에
+      `safe_file()` 이 거부하므로 다운로드 엔드포인트로는 절대 새 나가지 않는다.
+    """
+    return job_dir(job_id) / f".thumb_{int(index):03d}.jpg"
+
+
 def usage_bytes() -> int:
     """jobs/ 아래 전체 바이트 (완료물만 센다 — work/ 는 일시적)."""
     total = 0

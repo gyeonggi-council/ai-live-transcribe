@@ -15,6 +15,9 @@ jest.mock('@/lib/api', () => ({
   __esModule: true,
   downloadClipJobFile: (...args: unknown[]) => mockDownload(...args),
   deleteClipJob: (...args: unknown[]) => mockDelete(...args),
+  fetchClipJobFile: jest.fn().mockResolvedValue({ blob: new Blob(['x']), filename: 'x.mp4' }),
+  saveBlob: jest.fn(),
+  fetchClipThumb: jest.fn().mockResolvedValue(null),
 }));
 
 function job(over: Partial<ClipJobType>): ClipJobType {
@@ -66,7 +69,11 @@ describe('ClipJobsPanel', () => {
     });
     render(<ClipJobsPanel scope="mine" />);
     expect(screen.getAllByTestId('clip-job-row')).toHaveLength(2);
-    expect(screen.getAllByTestId('clip-job-download')).toHaveLength(2);
+    // mp4 는 썸네일 카드, 짝지어진 srt 는 그 카드 안의 「자막」 버튼
+    expect(screen.getAllByTestId('clip-file-card')).toHaveLength(1);
+    expect(screen.getAllByTestId('clip-file-download')).toHaveLength(1);
+    expect(screen.getAllByTestId('clip-file-srt')).toHaveLength(1);
+    expect(screen.getAllByTestId('clip-requested-at').length).toBeGreaterThan(0);
     expect(screen.getByTestId('clip-job-progress')).toHaveStyle({ width: '40%' });
     expect(screen.getByTestId('clip-store-usage')).toHaveTextContent('1.00 GB / 8.00 GB');
     expect(screen.getAllByText(/제393회 제2차 본회의/).length).toBeGreaterThan(0);
@@ -87,7 +94,7 @@ describe('ClipJobsPanel', () => {
   it('내려받기 클릭 → downloadClipJobFile(meeting, job, 파일명)', async () => {
     mockUseClipJobs.mockReturnValue({ jobs: [job({})], store: null, isLoading: false, error: null, refresh: jest.fn() });
     render(<ClipJobsPanel scope="mine" meetingId="m1" compact />);
-    fireEvent.click(screen.getAllByTestId('clip-job-download')[0]);
+    fireEvent.click(screen.getAllByTestId('clip-file-download')[0]);
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('m1', 'j1', expect.stringMatching(/\.mp4$/)));
   });
 
@@ -97,8 +104,8 @@ describe('ClipJobsPanel', () => {
       store: null, isLoading: false, error: null, refresh: jest.fn(),
     });
     render(<ClipJobsPanel />);
-    expect(screen.getByTestId('clip-job-evicted')).toHaveTextContent('저장 공간 부족');
-    expect(screen.queryByTestId('clip-job-download')).not.toBeInTheDocument();
+    expect(screen.getByTestId('clip-job-evicted')).toHaveTextContent('저장 공간이 모자라');
+    expect(screen.queryByTestId('clip-file-download')).not.toBeInTheDocument();
   });
 
   it('비어 있으면 안내', () => {

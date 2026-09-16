@@ -170,6 +170,7 @@ export const NAV_MODULES: NavModule[] = [
     items: [
       { id: 'admin', label: '시스템 상태', href: '/admin' },
       { id: 'admin-users', label: '사용자 관리', href: '/admin/users' },
+      { id: 'admin-channels', label: '채널 관리', href: '/admin/channels' },
       { id: 'admin-dictionary', label: '용어사전', href: '/admin/dictionary' },
       { id: 'admin-usage', label: 'API 사용량·비용', href: '/admin/usage' },
       // 접속 통계는 누구나 볼 수 있다(사이드바 하단 방문자 수를 눌러도 간다) — 관리자 메뉴에도 둔다
@@ -236,6 +237,7 @@ export const BREADCRUMB_MAP: Record<string, string[]> = {
   '/search': ['통합검색', '검색'],
   '/admin': ['시스템관리', '시스템 상태'],
   '/admin/users': ['시스템관리', '사용자 관리'],
+  '/admin/channels': ['시스템관리', '채널 관리'],
   '/admin/dictionary': ['시스템관리', '용어사전'],
   '/admin/usage': ['시스템관리', 'API 사용량·비용'],
   '/admin/tools': ['시스템관리', '영상추출기 배포'],

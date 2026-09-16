@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from app.core.auth_middleware import require_role
 from app.core.channels import get_all_channels, get_channel, set_stream_override
+from app.core.stream_hosts import allowed_stream_hosts
 from app.core.config import settings
 from app.services.auto_stt import get_auto_stt_manager
 from app.services.channel_status import get_channel_status_service
@@ -17,16 +18,9 @@ from app.services.hls_parser import render_playlist
 from app.services.live_batch_stt import live_sync_target_sec
 from app.services.openai_realtime_stt import get_channel_stt_service
 
-# SSRF 방지: 허용된 HLS 스트림 호스트
-ALLOWED_STREAM_HOSTS = frozenset({
-    "stream01.cdn.gov-ntruss.com",
-    "stream02.cdn.gov-ntruss.com",
-    # 국회 웹캐스트 CDN (외부 스트림 테스트 — 직접 m3u8 입력 지원)
-    "m.webcast.go.kr",
-    # 로컬 동기화 테스트 하네스 (scripts/hls_test_stream.py — 관리자 전용 API)
-    "127.0.0.1",
-    "localhost",
-})
+# SSRF 방지: 허용된 HLS 스트림 호스트.
+# 목록의 정본은 core/stream_hosts.py 로 옮겼다 — 빌트인에 **등록된 채널의 호스트**를
+# 더해, 다른 의회가 자기 CDN 을 등록하면 그 주소로도 STT 를 시작할 수 있게 하기 위해서다.
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +171,7 @@ async def start_channel_stt(
             # SSRF 방지: 허용된 호스트만 직접 URL로 사용
             parsed = urlparse(stream_url)
             host = (parsed.hostname or "").lower()
-            if host not in ALLOWED_STREAM_HOSTS:
+            if host not in allowed_stream_hosts():
                 raise HTTPException(
                     status_code=422,
                     detail=f"허용되지 않은 스트림 호스트입니다: {host}",

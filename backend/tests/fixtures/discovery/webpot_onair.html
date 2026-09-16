@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="ko"><head><title>생방송 : 인터넷방송</title>
+<script src="/js/lib/video.js"></script></head>
+<body>
+<ul class="chlist">
+  <li><a href="#" onclick="loadPlayerLive('ch14','t1','stream01.cdn.gov-ntruss.com');">본회의</a></li>
+  <li><a href="#" onclick="loadPlayerLive('ch7','t2','stream02.cdn.gov-ntruss.com');">안전행정위원회</a></li>
+</ul>
+<video id="gtplayer" class="video-js"></video>
+<script>
+  var xmplayer = null;
+  function loadPlayerLive(ch,thid,ip) {
+    if(xmplayer == null) { xmplayer = videojs('gtplayer'); }
+    //var streamUrl="http://198.51.100.10:1935/live/"+ch+"/playlist.m3u8";
+    if(ch !=""){
+      var streamUrl="https://"+ip+"/live/"+ch+"/playlist.m3u8";
+      xmplayer.src({type: "application/x-mpegURL", src: streamUrl});
+    }
+  }
+</script>
+</body></html>

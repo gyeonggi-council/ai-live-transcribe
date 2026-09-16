@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.core.channels import CHANNELS, get_channel_by_code
+from app.core.channels import get_all_channels, get_channel, get_channel_by_code
 from app.core.config import settings
 from app.services.channel_status import ChannelStatusService, get_channel_status_service
 from app.services.openai_realtime_stt import get_channel_stt_service
@@ -125,12 +125,11 @@ class AutoSttManager:
             return []
 
         started = []
-        status_map = await self._status_service.fetch_status()
+        status_map = await self._status_service.get_status_map_by_id()
 
-        for ch in CHANNELS:
-            code = ch["code"]
+        for ch in get_all_channels():
             channel_id = ch["id"]
-            livestatus = status_map.get(code, 0)
+            livestatus = status_map.get(channel_id, 0)
 
             if livestatus == LIVESTATUS_BROADCASTING and not self._stt_service.is_running(channel_id):
                 if channel_id in self._starting:  # 이미 시작 절차 진행 중 — 중복 기동 방지
@@ -155,13 +154,12 @@ class AutoSttManager:
     async def _start_stt_for_live_channels(self) -> None:
         """현재 방송중인 모든 채널에 STT를 시작합니다."""
         try:
-            status_map = await self._status_service.fetch_status()
+            status_map = await self._status_service.get_status_map_by_id()
 
             started_count = 0
-            for ch in CHANNELS:
-                code = ch["code"]
+            for ch in get_all_channels():
                 channel_id = ch["id"]
-                livestatus = status_map.get(code, 0)
+                livestatus = status_map.get(channel_id, 0)
 
                 if livestatus == LIVESTATUS_BROADCASTING:
                     if not self._stt_service.is_running(channel_id):
@@ -222,11 +220,17 @@ class AutoSttManager:
         """
         stopped_any = False
         for change in changes:
-            code = change.get("code", "")
             old_status = change.get("old_status")
             new_status = change.get("new_status")
 
-            channel = get_channel_by_code(code)
+            # channel_id 를 먼저 본다 — 코드가 없는 채널(probe·manual 제공자)은
+            # 코드로는 영원히 해석되지 않아 그 채널만 조용히 자동 STT 에서 빠진다.
+            channel = None
+            channel_id = change.get("channel_id")
+            if channel_id:
+                channel = get_channel(channel_id)
+            if channel is None:
+                channel = get_channel_by_code(change.get("code", ""))
             if channel is None:
                 continue
 

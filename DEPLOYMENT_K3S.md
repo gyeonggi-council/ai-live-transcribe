@@ -8,7 +8,7 @@ Phase 1은 web/API 실행부만 K3s로 이전합니다. Supabase REST·RLS·Real
 
 - `/transcribe`는 기존 `/`, `/hr`, `/ops`와 독립된 Deployment·Service·Ingress입니다.
 - API는 한 replica만 사용합니다. 라이브 STT, 비동기 작업, WebSocket broadcast가 현재 process-local이기 때문입니다.
-- `STT_AUTO_START=true` 입니다(2026-08-22 사용자 결정 — 끄면 방송이 열려도 자막이 안 나온다). 비용 상한은 OpenAI 월 하드리밋 $500. `VOD_AUTO_STT_*`(2026-09-03)로 새벽 AI 자막 자동 생성이 하루 10건 상한으로 돕니다.
+- `STT_AUTO_START=true` 입니다(2026-08-22 사용자 결정 — 끄면 방송이 열려도 자막이 안 나온다). 비용 상한은 OpenAI 월 하드리밋이다(기관이 콘솔에서 설정). `VOD_AUTO_STT_*`(2026-09-03)로 새벽 AI 자막 자동 생성이 하루 10건 상한으로 돕니다.
 - 업로드 파일은 `/app/uploads`의 단일-writer PVC로 보존합니다. 이 PVC는 노드 로컬 `local-path`(5Gi, reclaim `Delete`)이므로 workload 삭제 전 필요한 업로드 자료를 별도로 백업해야 합니다.
 - runtime Secret은 `ggc-live-transcribe-runtime`만 참조합니다. 기존 Secret을 재사용하지 않습니다.
 

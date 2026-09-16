@@ -34,7 +34,7 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from app.core.channels import CHANNELS
+from app.core.channels import get_all_channels
 from app.services.channel_status import ONAIR_API_URL
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,11 @@ _AGENDA_NUM_RE = re.compile(r"^\s*\d+\s*[.)]\s*")
 # 유효한 위원회 코드 — 채널 설정이 아는 코드만 받는다.
 # 달력에는 우리가 방송을 받지 않는 코드도 나오는데, 그것까지 저장하면
 # 화면에 '알 수 없는 위원회' 줄이 생긴다.
-_KNOWN_CODES = {c["code"] for c in CHANNELS if c.get("code")}
+# ★모듈 상수가 아니라 함수다 — 채널이 DB 에서 오므로 import 시점에 계산하면
+#   (캐시가 아직 비어 있어) **빈 집합으로 굳어** 수집한 의사일정을 전부 버린다.
+#   그러면 라이브 회의 제목의 회기·차수가 사라진다.
+def _known_codes() -> set[str]:
+    return {c["code"] for c in get_all_channels() if c.get("code")}
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -158,7 +162,7 @@ def parse_day_html(html: str) -> list[dict[str, Any]]:
     parser.feed(html)
     out = []
     for row in parser.rows:
-        if row["committee_code"] not in _KNOWN_CODES:
+        if row["committee_code"] not in _known_codes():
             logger.debug("의사일정: 모르는 위원회 코드 건너뜀 %s", row["committee_code"])
             continue
         session_no, session_kind = _extract_session(row["agenda_raw"])
@@ -184,7 +188,7 @@ def parse_month_html(html: str) -> dict[int, list[tuple[str, str]]]:
     result: dict[int, list[tuple[str, str]]] = {}
     for m in _CAL_LINK_RE.finditer(html):
         day, code = int(m.group(1)), m.group(2)
-        if code.upper() == "ALL" or code not in _KNOWN_CODES:
+        if code.upper() == "ALL" or code not in _known_codes():
             continue  # 'ALL' 은 그 날짜를 여는 링크일 뿐 회의가 아니다
         # 링크 텍스트가 위원회명
         tail = html[m.end() : m.end() + 300]

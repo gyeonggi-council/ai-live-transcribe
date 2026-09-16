@@ -30,7 +30,7 @@ function JobsContent() {
   ];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto w-full">
+    <div className="p-6 max-w-6xl mx-auto w-full">
       <PageHeader
         title="추출 기록"
         description={

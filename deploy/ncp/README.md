@@ -1,7 +1,7 @@
 # NCP PoC(k3s) 배포 런북 — 실시간 자막 서비스
 
 경기도의회 업무플랫폼 검증환경(poc-app k3s + poc-db PostgreSQL 16)으로의 이관 파이프라인.
-인프라 정본은 `D:\2026-ggc-vibe\CLAUDE.md`, 절차 표준은 `ggc-deploy` 스킬이다.
+인프라 절차는 기관의 인프라 문서를 따른다.
 이 디렉터리의 스크립트는 정본 `scripts/06~09·11` 의 복제·개명판이며, 전송·실행 규칙도 동일하다.
 
 ## 전제 (로컬 Git Bash, cwd = 저장소 루트)
@@ -45,7 +45,7 @@ $SSH $APP 'sudo -n bash /tmp/transcribe-20.sh < /dev/null' < /dev/null
 
 # 3) 런타임 Secret (poc-app, 대화형 — JWT 는 없을 때만 생성된다)
 $NORM deploy/ncp/25-set-runtime-secret.sh | $SSH $APP 'cat > /tmp/transcribe-25.sh'
-ssh -t -i /d/2026-ggc-vibe/keys/ggc-poc $APP 'bash /tmp/transcribe-25.sh'
+ssh -t -i "$GGC_SSH_KEY" $APP 'bash /tmp/transcribe-25.sh'
 
 # 4) 1단계 배포 — 워크로드만 (Ingress 없음)
 $NORM deploy/ncp/35-deploy.sh | $SSH $APP 'cat > /tmp/transcribe-35.sh'
@@ -69,10 +69,10 @@ $DB ncloud@<poc-db 사설 IP> 'sudo -n bash /tmp/transcribe-30.sh < /dev/null' <
 
 # 2) 데이터 이관 (poc-app, 대화형 — Supabase 비밀번호는 TTY 입력만)
 $NORM deploy/ncp/31-import-data.sh | $SSH $APP 'cat > /tmp/transcribe-31.sh'
-ssh -t -i /d/2026-ggc-vibe/keys/ggc-poc $APP 'sudo bash /tmp/transcribe-31.sh'
+ssh -t -i "$GGC_SSH_KEY" $APP 'sudo bash /tmp/transcribe-31.sh'
 
 # 3) Secret 에 DATABASE_URL 추가
-ssh -t -i /d/2026-ggc-vibe/keys/ggc-poc $APP 'bash /tmp/transcribe-25.sh --phase-b'
+ssh -t -i "$GGC_SSH_KEY" $APP 'bash /tmp/transcribe-25.sh --phase-b'
 
 # 4) postgres 모드 배포 + 검증
 $SSH $APP 'DB_BACKEND=postgres bash /tmp/transcribe-35.sh < /dev/null' < /dev/null
@@ -115,10 +115,10 @@ automountServiceAccountToken:false · 숫자 UID · latest 금지 · HSTS 금지
   8이던 2026-07-21 에 12개 상임위 동시 방송에서 시청자 50명 채널이 정회 속개 때
   시청자 0명 채널에 슬롯을 뺏겨 자막이 안 나온 사고가 있었다.
   비용: 채널당 ~$0.4/시간, 최악(전 상임위 동시) ~$5.6/시간 → **OpenAI 월 하드 리밋이 상한선.**
-- **OpenAI 월 하드 리밋 = $500** (2026-08-22 사용자 결정, 담당자가 OpenAI 콘솔에서 설정).
-  자동 자막을 켠 이상 **월 총액을 막는 장치는 이것뿐이다** — 앱의 동시 채널 14 상한과
-  무음 구간 호출 생략은 순간 부하만 누른다. 근거: 최번월(2026-07) 실측 106.8시간 ≈ $107,
-  $500 은 그 4.7배. 초과 시 API 가 차단되어 **자막이 멈추므로** $400 알림을 함께 건다.
-  사용량 확인: `/transcribe/admin/usage` (오디오 시간 × 단가 추정치, 실청구액은 OpenAI 대시보드).
+- **OpenAI 월 하드 리밋을 반드시 건다.** 자동 자막을 켠 이상 **월 총액을 막는 장치는 이것뿐이다**
+  — 앱의 동시 채널 상한과 무음 구간 호출 생략은 순간 부하만 누른다.
+  한도는 기관의 최번월 실사용량을 재서 그 몇 배로 잡고, 차단 전에 알림이 오도록 경고선을 함께 건다
+  (한도를 넘으면 API 가 막혀 **자막이 멈춘다**).
+  사용량 확인: `/<서비스경로>/admin/usage` (오디오 시간 × 단가 추정치, 실청구액은 OpenAI 대시보드).
 - JWT_SECRET_KEY·TLS 인증서·기존 Secret 은 재생성하지 않는다(전 세션 무효·지문 변경).
-- 접근통제 주 방어선은 **NCP ACG** (443 은 의회망 대역 + 담당자 PC 만. 22 는 /32 유지).
+- 접근통제 주 방어선은 **클라우드 보안그룹**이다. 443 은 필요한 출발지만, 관리 포트(22)는 단일 주소로 좁힌다.

@@ -180,6 +180,40 @@ class TestAnchorsForMeeting:
         assert source == "estimated"
         assert len(anchors) == 1
 
+    def test_late_starting_anchors_get_an_estimated_head(self):
+        """회의 도중에 기능이 배포된 회의 — 저장된 기준점 앞 구간은 추정으로 채운다.
+
+        앞 구간을 첫 기준점에서 거꾸로 늘리면 그 사이의 점심 정회를 건너뛰어
+        오전 장면이 한 시간 넘게 틀린다.
+        """
+        lag = meeting_clock.ESTIMATED_EMIT_LAG_SEC
+        morning = datetime(2026, 9, 16, 10, 0, 0, tzinfo=KST)
+        subs = [
+            {
+                "start_time": t,
+                "created_at": (morning + timedelta(seconds=t + lag)).isoformat(),
+            }
+            for t in range(0, 3600, 30)
+        ]
+        fake = FakeSupabase(
+            {
+                # 오후 속개 시점(자막 시계 3600초)에 배포되어 그때부터 기준점이 남았다
+                "meeting_clock_anchors": [
+                    {"clock_sec": 3600.0, "wall_at": _iso(14, 0, 0)}
+                ],
+                "subtitles": subs,
+            }
+        )
+        anchors, source = meeting_clock.anchors_for_meeting(fake, "m1")
+        assert source == "mixed"
+        # 오전 장면은 추정 기준점으로 — 거꾸로 늘렸다면 13:00 대가 나왔을 지점
+        got = meeting_clock.wall_at_clock(anchors, 1800.0)
+        assert abs((got - (morning + timedelta(seconds=1800))).total_seconds()) < 5.0
+        # 오후 장면은 저장된 기준점 그대로
+        assert meeting_clock.wall_at_clock(anchors, 3600.0) == datetime(
+            2026, 9, 16, 14, 0, 0, tzinfo=KST
+        )
+
     def test_none_when_nothing_to_go_on(self):
         fake = FakeSupabase({"meeting_clock_anchors": [], "subtitles": []})
         assert meeting_clock.anchors_for_meeting(fake, "m1") == ([], "none")
