@@ -1,0 +1,217 @@
+# 화면 인덱스
+version: "2.0"
+
+# ============================================
+# 프로젝트 정보
+# ============================================
+project:
+  name: 경기도의회 실시간 자막 서비스
+  version: "1.0.0"
+  description: 경기도의회 회의 영상에 실시간/VOD 자막을 제공하는 서비스
+
+# ============================================
+# 화면 목록
+# ============================================
+screens:
+  - id: S-01
+    name: 홈 대시보드
+    route: /
+    file: home.yaml
+    features: [FEAT-1, FEAT-3]
+    priority: high
+
+  - id: S-02
+    name: 실시간 뷰어
+    route: /live
+    file: live-viewer.yaml
+    features: [FEAT-1, FEAT-2]
+    priority: high
+
+  - id: S-03
+    name: VOD 목록
+    route: /vod
+    file: vod-list.yaml
+    features: [FEAT-3]
+    priority: medium
+
+  - id: S-04
+    name: VOD 뷰어
+    route: /vod/:id
+    file: vod-viewer.yaml
+    features: [FEAT-2, FEAT-3, FEAT-4]
+    priority: high
+    phase: 11
+    note: "AI 요약/Q&A 패널 추가 (Phase 11)"
+
+  - id: S-14
+    name: AI 어시스턴트
+    route: /ai
+    file: ai-assistant.yaml
+    features: [FEAT-4]
+    priority: high
+    phase: 11
+    auth_required: false
+
+  - id: S-15
+    name: 로그인
+    route: /login
+    file: login.yaml
+    features: [FEAT-5]
+    priority: high
+    phase: 11
+    auth_required: false
+
+  - id: S-16
+    name: 속기 관리 대시보드
+    route: /stenography
+    file: stenography-dashboard.yaml
+    features: [FEAT-6]
+    priority: medium
+    phase: 11
+    auth_required: true
+    required_roles: [stenographer, admin]
+
+  - id: S-12'
+    name: 속기 편집기 (리디자인)
+    route: /vod/:id/stenography/:recordId/edit
+    file: stenography-editor.yaml
+    features: [FEAT-6]
+    priority: high
+    phase: 11
+    auth_required: true
+    required_roles: [stenographer, admin]
+    note: "가상 스크롤, AI 보조, 실시간 음성 동기화 추가"
+
+# ============================================
+# 모달 목록
+# ============================================
+modals:
+  - id: M-01
+    name: VOD 등록 모달
+    file: vod-register-modal.yaml
+    triggers: [S-01, S-03]
+
+  - id: M-02
+    name: AI 요약 모달
+    file: ai-summary-modal.yaml
+    triggers: [S-01, S-04, S-16]
+    phase: 11
+
+# ============================================
+# 기능 정의
+# ============================================
+features:
+  FEAT-1:
+    name: 실시간 자막
+    description: HLS 스트림과 WebSocket 기반 실시간 자막
+
+  FEAT-2:
+    name: 키워드 검색
+    description: 자막 내 키워드 검색 및 하이라이트
+
+  FEAT-3:
+    name: VOD 자막
+    description: VOD 등록 및 자막 생성/조회
+
+  FEAT-4:
+    name: AI 어시스턴트 (Phase 11)
+    description: GPT-5-mini 기반 회의 Q&A, 요약, 맥락 기반 질문 응답
+    phase: 11
+
+  FEAT-5:
+    name: 인증 시스템 (Phase 11)
+    description: 로그인/로그아웃, JWT 토큰, 세션 관리, 역할 기반 접근 제어
+    phase: 11
+
+  FEAT-6:
+    name: 속기 편집 (Phase 11)
+    description: 속기사 전문 편집기, 음성 동기화, AI 보조, 라인 수정 관리
+    phase: 11
+
+# ============================================
+# 네비게이션 구조
+# ============================================
+navigation:
+  primary:
+    - route: /
+      label: 홈
+    - route: /vod
+      label: VOD 목록
+
+  from_home:
+    - to: /live
+      condition: 실시간 회의 존재
+    - to: /vod
+    - to: /vod/:id
+
+  from_live:
+    - to: /
+
+  from_vod_list:
+    - to: /
+    - to: /vod/:id
+
+  from_vod_viewer:
+    - to: /
+    - to: /vod
+
+# ============================================
+# 화면 연결 매트릭스
+# ============================================
+connection_matrix:
+  #         홈    실시간   VOD목록  VOD뷰어  로그인  AI어시스턴트  속기대시  속기편집  등록모달 요약모달
+  S-01:    [-,    true,   true,    true,    true,  true,         false,    false,   true,   true]
+  S-02:    [true, -,      false,   false,   true,  true,         false,    false,   false,  false]
+  S-03:    [true, false,  -,       true,    true,  false,        false,    false,   true,   false]
+  S-04:    [true, false,  true,    -,       true,  true,         false,    true,    false,  true]
+  S-14:    [true, false,  false,   true,    true,  -,            false,    false,   false,  false]
+  S-15:    [true, true,   true,    true,    -,     true,         true,     true,    false,  false]
+  S-16:    [true, false,  false,   false,   true,  false,        -,        true,    false,  true]
+  S-12':   [true, false,  false,   false,   true,  true,         true,     -,       false,  false]
+  M-01:    [true, false,  true,    false,   false, false,        false,    false,   -,      false]
+  M-02:    [true, false,  false,   true,    false, false,        true,     false,   false,  -]
+
+# ============================================
+# 공통 의존성
+# ============================================
+shared_dependencies:
+  - shared/components.yaml
+  - shared/types.yaml
+
+# ============================================
+# 도메인 리소스 참조
+# ============================================
+domain:
+  resource_file: ../domain/resources.yaml
+  resources_used:
+    - meetings
+    - subtitles
+    - ai_conversations (Phase 11)
+    - stenography_records (Phase 11)
+    - stenography_lines (Phase 11)
+    - stenography_edit_history (Phase 11)
+    - users (Phase 11)
+    - councilors (Phase 11)
+
+# ============================================
+# Phase 11 추가 사항
+# ============================================
+phase_11_summary:
+  new_screens: 5 (S-14, S-15, S-16, S-12', M-02)
+  updated_screens: 2 (S-01, S-04)
+  features_added:
+    - AI 어시스턴트 (질문/응답, 회의 요약, 맥락 기반 Q&A)
+    - 로그인/인증 (JWT, 세션 관리, 역할 기반 접근)
+    - 속기 관리 대시보드 (대기열, 진행중, 완료)
+    - 속기 편집기 리디자인 (가상 스크롤, 음성 동기화, AI 보조, 수정 이력)
+    - AI 요약 모달 (생성/재생성 기능)
+  new_components:
+    - ai_chat_panel (재사용: 홈, VOD뷰어, AI어시스턴트)
+    - ai_summary_card (홈)
+    - ai_panel (VOD뷰어)
+    - audio_player_section (속기편집)
+    - line_editor (가상 스크롤, 1000+ 라인)
+    - stt_reference_bar (STT 대조)
+    - ai_assist_panel (AI 보조)
+    - edit_history_panel (수정 이력 diff)
+    - find_replace_bar (찾기/바꾸기)

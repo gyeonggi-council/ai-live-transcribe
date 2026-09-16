@@ -1,0 +1,155 @@
+# S-02: 실시간 뷰어
+version: "2.0"
+
+screen:
+  id: S-02
+  name: 실시간 뷰어
+  route: /live
+  layout: sidebar-main  # 70% main / 30% sidebar
+  auth_required: false
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: meetings
+    alias: current_meeting
+    needs: [id, title, meeting_date, stream_url, status]
+    filters: { status: live }
+    description: 현재 실시간 회의 정보
+
+  - resource: subtitles
+    alias: subtitle_history
+    needs: [id, start_time, end_time, text, speaker]
+    source: websocket
+    endpoint: /ws/meetings/{meeting_id}/subtitles
+    description: 실시간 자막 스트림 (WebSocket)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: true
+      show_live_badge: true
+      title_source: current_meeting.title
+
+  - id: video_player
+    type: video
+    position: main
+    function: HLS 스트리밍 재생
+    data_source:
+      resource: current_meeting
+      field: stream_url
+    player_type: hls
+    controls:
+      - volume
+    events:
+      - on: error:stream
+        do: show_toast(error, "영상을 불러올 수 없습니다")
+
+  - id: subtitle_panel
+    type: list
+    position: sidebar
+    function: 실시간 자막 히스토리 표시
+    data_source:
+      resource: subtitle_history
+    realtime: true
+    auto_scroll: true
+    item_template:
+      display: [time_formatted, text]
+      highlight_field: text
+      highlight_trigger: search_query
+    events:
+      - on: click:item
+        do: video_player.seek(item.start_time)
+      - on: new_item
+        do: scroll_to_bottom
+
+  - id: search_input
+    type: search
+    position: header
+    function: 자막 키워드 검색
+    target: subtitle_panel
+    highlight_color: "#FEF08A"  # Highlight Yellow
+    events:
+      - on: input
+        do: highlight_matches(subtitle_panel, query)
+      - on: clear
+        do: clear_highlights(subtitle_panel)
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# WebSocket 연결
+# ============================================
+websocket:
+  endpoint: /ws/meetings/{current_meeting.id}/subtitles
+  events:
+    - on: subtitle_created
+      do: append(subtitle_panel, payload.subtitle)
+    - on: disconnect
+      do: show_toast(warning, "연결이 끊어졌습니다. 재연결 중...")
+    - on: reconnect
+      do: show_toast(success, "연결되었습니다")
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: /
+      via: click:watch_button
+  outgoing:
+    - to: /
+      trigger: click:logo
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  empty:
+    condition: subtitle_history.length == 0
+    display: spinner + "자막을 불러오는 중..."
+
+  error_stream:
+    condition: video_player.error
+    display: "영상을 불러올 수 없습니다. 새로고침해주세요."
+
+  error_websocket:
+    condition: websocket.disconnected
+    display: toast(warning, "재연결 중...")
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 초기 로드
+    when: /live 접속, 실시간 회의 있음
+    then:
+      - HLS 스트림 재생 시작
+      - WebSocket 연결
+      - Live 배지 표시
+
+  - name: 실시간 자막 수신
+    when: WebSocket으로 새 자막 도착
+    then:
+      - 자막 패널에 추가
+      - 자동 스크롤
+
+  - name: 자막 클릭 → 시점 이동
+    when: 자막 항목 클릭
+    then: 영상이 해당 start_time으로 이동
+
+  - name: 키워드 검색
+    when: 검색창에 "예산" 입력
+    then: 자막 텍스트에서 "예산" 노란색 하이라이트
+
+  - name: WebSocket 재연결
+    when: 연결 끊김 → 재연결 성공
+    then: "연결되었습니다" 토스트 표시

@@ -1,0 +1,158 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+.nyc_output
+
+# Next.js
+.next/
+out/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+.installed.cfg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker
+.docker/
+
+# OS
+Thumbs.db
+ehthumbs.db
+nul
+
+# Playwright MCP
+.playwright-mcp/
+
+# AI 세션 아티팩트 (핸드오프/플랜/브라우저 텔레메트리 — 소스 아님)
+.claude/
+.openchrome/
+
+# Archive (스크린샷, 점검 캡처 등)
+_archive/
+
+# Claude Design bundles (external handoff artifacts, not source)
+design/
+
+# Autoresearch local workflow (program.md, eval results — local only)
+autoresearch/
+
+# Runtime upload artifacts (user-generated content, not source)
+# 사용자 업로드 파일은 스토리지(Supabase/S3)로 관리되어야 하며 소스에 포함되면 안 됨.
+# 디렉토리 자체는 .gitkeep으로 유지하여 앱 기동 시 write 경로를 보장.
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Screenshots (demo)
+*.png
+# 단, 프로젝트 자산(CI, 파비콘 등)은 예외로 추적
+!frontend/public/**/*.png
+!frontend/src/app/icon.png
+!frontend/src/app/apple-icon.png
+
+# Root package files (supabase CLI)
+/package.json
+/package-lock.json
+
+.vercel
+
+# STT 평가 데이터 (참조 속기록·평가 결과 — 도구로 재생성 가능)
+backend/eval_data/*
+!backend/eval_data/.gitkeep
+
+# 배포 대상 좌표(서버 주소) — 저장소에 넣지 않는다
+deploy/ncp/env.sh
+
+# 라이브 녹음 백업·속기 대조 산출물 (2026-09-08) — 도구로 재생성 가능, 회의 발언 원문이라 저장소에 넣지 않는다
+backend/recordings/
+backend/_steno_*.txt
+backend/_ai_*.txt
+backend/_livecer_*.json
+backend/_spk_*.json
+
+# 비밀 자료 (공개 저장소 안전장치)
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+kubeconfig
+.env.production

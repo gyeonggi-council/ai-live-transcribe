@@ -1,0 +1,624 @@
+# S-12': 속기 편집기 (Phase 11 리디자인)
+version: "2.0"
+
+screen:
+  id: S-12'
+  name: 속기 편집기 (리디자인)
+  route: /vod/:id/stenography/:recordId/edit
+  layout: editor-focused
+  auth_required: true
+  required_roles: [stenographer, admin]
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: stenography_records
+    alias: stenography_record
+    needs: [id, record_id, meeting_id, status, stenographer_name, created_at, updated_at]
+    params: { id: ":recordId" }
+    description: 속기록 정보
+
+  - resource: stenography_lines
+    alias: stenography_lines
+    needs: [id, record_id, sequence_no, text, speaker, start_ms, end_ms, starts_new_paragraph]
+    filters: { record_id: ":recordId" }
+    sort: { sequence_no: asc }
+    description: 속기록 라인 목록 (1000+ 라인 가상 스크롤)
+
+  - resource: meetings
+    alias: meeting_info
+    needs: [id, title, meeting_date, vod_url, duration_seconds, status]
+    params: { id: ":id" }
+    description: 회의 정보 (비디오 URL, 메타데이터)
+
+  - resource: subtitles
+    alias: stt_subtitles
+    needs: [id, text, speaker, start_time, end_time, confidence]
+    filters: { meeting_id: ":id" }
+    sort: { start_time: asc }
+    description: STT 자막 (참고용, 대조용)
+
+  - resource: stenography_edit_history
+    alias: edit_history
+    needs: [id, record_id, line_id, field_changed, old_value, new_value, editor_name, created_at]
+    filters: { record_id: ":recordId" }
+    sort: { created_at: desc }
+    description: 라인별 수정 이력 (diff 표시용)
+
+  - resource: councilors
+    alias: councilor_list
+    needs: [id, name, party, role]
+    description: 의원 목록 (화자 드롭다운)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: false
+
+  - id: audio_player_section
+    type: container
+    position: header
+    height: 120px
+    background: "#F3F4F6"
+    border_bottom: "1px solid #E5E7EB"
+    padding: 12px
+    sticky: true
+    z_index: 90
+    content:
+      - id: audio_player
+        type: video
+        function: MP4 재생 (오디오 중심, 작은 영상 프리뷰)
+        data_source:
+          resource: meeting_info
+          field: vod_url
+        player_type: mp4-audio
+        width: 100%
+        height: 100px
+        controls:
+          - play_pause
+          - timeline_scrubber
+          - volume
+          - playback_rate
+        playback_rates: [0.5, 0.75, 1, 1.25, 1.5, 2]
+        show_waveform: true
+        keyboard_shortcuts:
+          F5: play_pause
+          F6: stop
+          F7: skip_back_5s
+          F8: skip_forward_5s
+        events:
+          - on: timeupdate
+            do: highlight_current_line(stenography_lines, currentTime)
+          - on: play
+            do: auto_scroll_to_current_line
+            context: { line_height: 40px }
+
+  - id: editor_toolbar
+    type: toolbar
+    position: editor-top
+    height: 48px
+    background: white
+    border_bottom: "1px solid #E5E7EB"
+    sticky: true
+    z_index: 85
+    padding: 8px 12px
+    gap: 8px
+    actions:
+      - id: save_button
+        type: button
+        label: "저장"
+        icon: save
+        variant: primary
+        keyboard_shortcut: Ctrl+S
+        tooltip: "Ctrl+S"
+        event: save_stenography_lines
+        disabled_condition: !stenography_lines.dirty
+
+      - id: undo_button
+        type: button
+        label: "실행취소"
+        icon: undo
+        variant: secondary
+        keyboard_shortcut: Ctrl+Z
+        tooltip: "Ctrl+Z"
+        event: undo_edit
+        disabled_condition: !edit_history.has_previous
+
+      - id: divider_1
+        type: divider
+
+      - id: ai_assist_button
+        type: button
+        label: "AI 보조"
+        icon: sparkles
+        variant: secondary
+        event: toggle_ai_assist_panel
+        badge: "Beta"
+
+      - id: find_replace_button
+        type: button
+        label: "찾기/바꾸기"
+        icon: search
+        keyboard_shortcut: Ctrl+F
+        event: toggle_find_replace_bar
+
+      - id: import_button
+        type: dropdown
+        label: "임포트"
+        icon: upload
+        options:
+          - label: "STT 자막에서"
+            event: import_from_subtitles
+          - label: "텍스트 파일에서"
+            event: import_from_text
+        variant: secondary
+
+      - id: history_button
+        type: button
+        label: "수정 이력"
+        icon: history
+        event: toggle_edit_history_panel
+        badge: "{{ edit_history.length }}"
+        variant: secondary
+
+      - id: divider_2
+        type: divider
+
+      - id: status_badge
+        type: badge
+        label: "{{ stenography_record.status }}"
+        variant:
+          draft: orange
+          submitted: blue
+          approved: green
+        position: right
+
+  - id: stt_reference_bar
+    type: collapsible_panel
+    position: main-top
+    title: "STT 참고"
+    collapsed_default: false
+    toggle_icon: chevron_down
+    height: 80px
+    background: "#FEF3C7"
+    border: "1px solid #FCD34D"
+    padding: 12px
+    content:
+      - id: stt_reference_text
+        type: rich_text
+        function: 현재 재생 위치 기반 STT 자막 참고 표시
+        data_source:
+          resource: stt_subtitles
+          filter: start_time <= currentTime < end_time
+        render:
+          - speaker_label: "{{ speaker }}"
+          - text_content: "{{ text }}"
+          - confidence_indicator: "신뢰도: {{ confidence | percent }}"
+        styles:
+          color: "#78350F"
+          line_height: 1.6
+          padding: 8px
+        diff_highlight:
+          condition: text != stenography_line.text
+          style: "background-color: #FCA5A5; text-decoration: underline wavy"
+
+  - id: line_editor
+    type: virtual_list
+    position: main
+    function: 텍스트 중심 라인 편집기 (가상 스크롤, 1000+ 라인 지원)
+    data_source:
+      resource: stenography_lines
+    scroll_behavior: smooth
+    item_height: 44px
+    overscan: 5
+    width: calc(100% - 40px)
+    margin: 20px
+    content_template:
+      - id: line_editor_row
+        type: container
+        display: flex
+        align_items: center
+        gap: 12px
+        padding: 8px 12px
+        border_bottom: "1px solid #E5E7EB"
+        highlight:
+          condition: is_current_line
+          background: "#FEF3C7"  # amber
+          border_left: "4px solid #F59E0B"
+        hover:
+          background: "#F9FAFB"
+        dirty_indicator:
+          condition: line.modified
+          display: blue_dot (left side)
+        content:
+          - id: sequence_number
+            type: span
+            width: 40px
+            text_align: center
+            content: "{{ sequence_no }}"
+            styles:
+              color: "#9CA3AF"
+              font_weight: 500
+              font_size: 12px
+
+          - id: time_input
+            type: input
+            width: 60px
+            type_field: time
+            value: "{{ format_time(start_ms) }}"
+            placeholder: "00:00"
+            on_change:
+              action: update_line_start_time
+              params: { line_id, new_time }
+            styles:
+              font_size: 12px
+              padding: 4px 8px
+
+          - id: speaker_dropdown
+            type: select
+            width: 120px
+            options_from: councilor_list
+            value: "{{ speaker }}"
+            allow_custom_input: true
+            autocomplete: true
+            on_change:
+              action: update_line_speaker
+              params: { line_id, new_speaker }
+            placeholder: "화자 선택"
+
+          - id: text_input
+            type: textarea
+            flex: 1
+            rows: 1
+            auto_expand: false
+            value: "{{ text }}"
+            placeholder: "내용 입력..."
+            on_change:
+              action: update_line_text
+              debounce: 300ms
+              params: { line_id, new_text }
+            styles:
+              font_size: 13px
+              line_height: 1.4
+              resize: vertical
+            spellcheck: true
+
+          - id: end_time_input
+            type: input
+            width: 60px
+            type_field: time
+            value: "{{ format_time(end_ms) }}"
+            placeholder: "00:00"
+            on_change:
+              action: update_line_end_time
+              params: { line_id, new_time }
+            styles:
+              font_size: 12px
+              padding: 4px 8px
+
+          - id: paragraph_toggle
+            type: checkbox
+            width: 32px
+            checked: "{{ starts_new_paragraph }}"
+            title: "문단 시작"
+            on_change:
+              action: toggle_paragraph_start
+              params: { line_id }
+            icon: pilcrow
+
+          - id: line_actions
+            type: button_group
+            width: auto
+            gap: 4px
+            buttons:
+              - id: insert_above
+                type: icon_button
+                icon: plus
+                title: "위에 라인 추가"
+                event: insert_line_above
+                size: sm
+              - id: insert_below
+                type: icon_button
+                icon: plus
+                title: "아래에 라인 추가"
+                event: insert_line_below
+                size: sm
+              - id: delete_line
+                type: icon_button
+                icon: trash
+                title: "라인 삭제"
+                event: confirm_delete_line
+                size: sm
+                variant: danger
+
+  - id: find_replace_bar
+    type: floating_bar
+    position: editor-bottom-fixed
+    visibility:
+      condition: find_replace_visible
+    height: 60px
+    background: white
+    border_top: "1px solid #E5E7EB"
+    padding: 12px
+    gap: 8px
+    display: flex
+    z_index: 80
+    content:
+      - id: find_input
+        type: input
+        placeholder: "찾기..."
+        width: 200px
+        keyboard_shortcut: Ctrl+F
+        on_input:
+          action: highlight_all_matches
+      - id: replace_input
+        type: input
+        placeholder: "바꾸기..."
+        width: 200px
+      - id: find_prev
+        type: button
+        label: "이전"
+        icon: arrow_up
+        event: find_previous
+      - id: find_next
+        type: button
+        label: "다음"
+        icon: arrow_down
+        event: find_next
+      - id: replace_button
+        type: button
+        label: "바꾸기"
+        event: replace_one
+      - id: replace_all_button
+        type: button
+        label: "모두 바꾸기"
+        event: replace_all
+      - id: match_count
+        type: span
+        text: "{{ find_matches.length }} 개"
+      - id: close_find_replace
+        type: button
+        label: "X"
+        event: close_find_replace_bar
+
+  - id: ai_assist_panel
+    type: sidebar
+    position: right
+    width: 320px
+    visibility:
+      condition: ai_assist_visible
+    collapsible: true
+    sticky: true
+    padding: 16px
+    background: "#F0F9FF"
+    border_left: "1px solid #E0F2FE"
+    function: AI 보조 기능 패널
+    content:
+      - id: ai_assist_title
+        type: heading
+        level: 3
+        text: "AI 보조 (Beta)"
+
+      - id: auto_speaker_button
+        type: button
+        label: "화자 자동 구분"
+        icon: users
+        variant: secondary
+        full_width: true
+        event: ai_suggest_speakers
+        tooltip: "STT 결과 기반 의원 이름 자동 제안"
+
+      - id: auto_grammar_button
+        type: button
+        label: "맞춤법 교정"
+        icon: spell_check
+        variant: secondary
+        full_width: true
+        event: ai_suggest_grammar
+        tooltip: "한국어 문법 및 띄어쓰기 교정"
+
+      - id: auto_paragraph_button
+        type: button
+        label: "문단 구분"
+        icon: pilcrow
+        variant: secondary
+        full_width: true
+        event: ai_suggest_paragraphs
+        tooltip: "발언 주체 변경점에서 자동 문단 구분"
+
+      - id: ai_assist_result
+        type: container
+        margin_top: 20px
+        visibility:
+          condition: ai_suggestion.pending || ai_suggestion.result
+        content:
+          - id: loading_spinner
+            visibility:
+              condition: ai_suggestion.pending
+            content: spinner + "처리 중..."
+          - id: suggestion_list
+            visibility:
+              condition: ai_suggestion.result
+            type: list
+            items:
+              - type: card
+                content:
+                  - line_id: "{{ suggestion.line_id }}"
+                  - current_value: "현재: {{ suggestion.current }}"
+                  - suggested_value: "제안: {{ suggestion.suggested }}"
+                  - button:
+                      label: "적용"
+                      event: apply_ai_suggestion
+                      size: sm
+
+  - id: edit_history_panel
+    type: sidebar
+    position: right
+    width: 320px
+    visibility:
+      condition: edit_history_visible
+    overflow_y: auto
+    max_height: calc(100vh - 200px)
+    padding: 16px
+    background: white
+    border_left: "1px solid #E5E7EB"
+    function: 수정 이력 패널 (diff 표시)
+    title: "수정 이력"
+    content:
+      - id: history_list
+        type: list
+        data_source:
+          resource: edit_history
+        item_template:
+          - id: history_item
+            type: card
+            padding: 12px
+            border_bottom: "1px solid #E5E7EB"
+            content:
+              - timestamp: "{{ created_at | format_datetime }}"
+              - editor: "{{ editor_name }}"
+              - line_no: "라인 {{ line_id }}"
+              - field: "필드: {{ field_changed }}"
+              - old_value:
+                  label: "변경 전"
+                  value: "{{ old_value }}"
+                  style: background-color: #FEE2E2
+              - new_value:
+                  label: "변경 후"
+                  value: "{{ new_value }}"
+                  style: background-color: #DCFCE7
+              - button:
+                  label: "되돌리기"
+                  variant: secondary
+                  size: sm
+                  event: revert_to_history
+                  params: { history_id }
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  loading:
+    condition: stenography_lines.loading
+    display: spinner + "속기 라인을 불러오는 중..."
+
+  dirty:
+    condition: stenography_lines.modified
+    title_badge: "수정됨"
+    browser_warning: "저장하지 않은 변경사항이 있습니다"
+    unsaved_indicator: "*" in window title
+
+  saved:
+    condition: save_successful
+    action: clear_dirty_flag, show_toast("저장되었습니다")
+
+  error_save:
+    condition: save_error
+    display: error_alert("저장 실패. 다시 시도해주세요.")
+
+# ============================================
+# 로컬 스토리지
+# ============================================
+persistence:
+  auto_save_interval: 10s
+  save_to: localStorage
+  key: "stenography_draft_{{ recordId }}"
+  fields: [stenography_lines, edit_history]
+  on_load:
+    action: recover_from_autosave
+    condition: unsaved_changes_exist
+
+# ============================================
+# 키보드 단축키
+# ============================================
+keyboard_shortcuts:
+  F5: play_pause_audio
+  F6: stop_audio
+  F7: skip_back_5s
+  F8: skip_forward_5s
+  Ctrl+S: save_stenography
+  Ctrl+Z: undo_edit
+  Ctrl+F: toggle_find_replace
+  Ctrl+Enter: save_and_submit (when ready)
+  Tab: move_to_next_field
+  Shift+Tab: move_to_prev_field
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: /stenography
+      via: click:edit_button
+    - from: /vod/:id
+      via: click:stenography_link
+  outgoing:
+    - to: /stenography
+      trigger: click:back_button
+    - to: /vod/:id
+      trigger: click:meeting_link
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 텍스트 편집 및 저장
+    when: 라인 텍스트 수정 후 Ctrl+S
+    then:
+      - 라인 텍스트 업데이트 됨 (좌측 blue dot 표시)
+      - 저장 버튼 활성화
+      - Ctrl+S 후 PATCH /api/meetings/:id/stenography/:rid/lines 호출
+      - 토스트: "저장되었습니다" 표시
+      - dirty flag 제거
+
+  - name: 음성 동기화
+    when: 오디오 플레이어 재생 중 (currentTime = 65초)
+    then:
+      - 65초 해당 라인이 노란색(amber) 배경 하이라이트
+      - 자동 스크롤로 현재 라인을 뷰포트 중앙에 위치
+
+  - name: AI 화자 교정
+    when: "화자 자동 구분" 버튼 클릭
+    then:
+      - AI 보조 패널에서 처리 중 스피너 표시
+      - 각 라인별 화자 제안 목록 표시
+      - "적용" 버튼으로 개별 제안 적용
+      - 적용된 라인은 화자 필드 업데이트 + dirty 표시
+
+  - name: 수정 이력 diff
+    when: "수정 이력" 버튼 클릭 후 이력 항목 선택
+    then:
+      - 변경 전(빨강) vs 변경 후(초록) diff 표시
+      - "되돌리기" 버튼으로 특정 변경 취소 가능
+
+  - name: 찾기/바꾸기
+    when: Ctrl+F 또는 "찾기/바꾸기" 버튼 클릭
+    then:
+      - 하단 고정 찾기/바꾸기 바 표시
+      - 검색어 입력 시 모든 일치 항목 하이라이트
+      - "다음" 버튼으로 항목 순회
+      - "바꾸기"/"모두 바꾸기" 기능
+
+  - name: STT 참고바 대조
+    when: 오디오 재생 중, STT 자막과 속기 내용 다른 경우
+    then:
+      - STT 참고바에 현재 재생 위치 자막 표시
+      - 속기록 라인과 다른 부분 빨간 물결선 언더라인 표시
+      - 참고바 텍스트와 비교하여 내용 수정 가능
+
+  - name: 로컬 자동저장
+    when: 라인 수정 후 10초 경과
+    then:
+      - localStorage에 현재 상태 자동 저장
+      - 페이지 새로고침 시 이전 상태 복구
+      - "회복되었습니다" 토스트 표시

@@ -1,0 +1,500 @@
+# 공유 컴포넌트 명세 (Phase 11)
+version: "2.0"
+
+# ============================================
+# 개요
+# ============================================
+description: |
+  Phase 11에서 여러 화면에서 재사용되는 공유 컴포넌트 정의
+  - AI 채팅 패널 (홈, VOD뷰어, AI어시스턴트)
+  - 역할 기반 가드
+  - 로그인 상태 UI
+  - AI 관련 컴포넌트
+
+# ============================================
+# AI 채팅 패널 (재사용)
+# ============================================
+shared_components:
+  - id: ai_chat_panel
+    name: AI 채팅 패널
+    type: panel
+    scope: [S-01, S-04, S-14]
+    description: "우측 고정 AI 어시스턴트 채팅 패널"
+
+    variants:
+      full:
+        width: 400px
+        height: 100vh
+        show_history: true
+        show_session_list: true
+        context: [S-14]
+
+      compact:
+        width: 320px
+        height: 500px
+        show_history: false
+        show_session_list: false
+        context: [S-01, S-04]
+        collapsible: true
+
+    props:
+      - name: meeting_id
+        type: string
+        required: false
+        description: "회의 ID (선택, 제공 시 맥락 설정)"
+
+      - name: bill_id
+        type: string
+        required: false
+        description: "의안 ID (선택, 제공 시 맥락 설정)"
+
+      - name: compact_mode
+        type: boolean
+        default: false
+        description: "컴팩트 모드 활성화"
+
+      - name: show_settings
+        type: boolean
+        default: true
+        description: "설정 아이콘 표시"
+
+    structure:
+      header:
+        - title: "AI 도움"
+        - icon: sparkles
+        - context_badge: "{{ context_type }}" (if set)
+        - actions:
+            - settings_button
+            - collapse_button
+
+      message_list:
+        - virtual_scroll: true
+        - max_height: calc(100% - 120px)
+        - item_template:
+            user_message:
+              align: right
+              background: "#3B82F6"
+              text_color: white
+              border_radius: 12px
+            ai_message:
+              align: left
+              background: "#E5E7EB"
+              text_color: "#1F2937"
+              border_radius: 12px
+              sources: card_list (if present)
+
+      input_area:
+        - textarea: "질문 입력..."
+        - rows: 2
+        - keyboard_shortcut: "Enter 전송, Shift+Enter 줄바꿈"
+        - send_button: primary variant
+        - actions:
+            - context_selector (if not compact)
+
+    events:
+      - event: open_panel
+        trigger: click:ai_icon | click:chat_button
+      - event: send_question
+        trigger: click:send_button | keydown:Enter
+      - event: set_context
+        trigger: select from context_selector
+      - event: close_panel
+        trigger: click:collapse_button | backdrop_click
+
+    data_source:
+      resource: ai_conversations
+      filters: { session_id: ":session_id" }
+      sort: { created_at: asc }
+
+    styling:
+      background: white
+      border: "1px solid #E5E7EB"
+      box_shadow: "0 4px 12px rgba(0,0,0,0.1)"
+      border_radius: 12px
+      transition: "all 300ms ease"
+
+  # ============================================
+  # 역할 기반 가드
+  # ============================================
+  - id: role_guard
+    name: 역할 기반 접근 제어 컴포넌트
+    type: wrapper
+    scope: all
+    description: "사용자 역할에 따라 컴포넌트 표시/숨김"
+
+    props:
+      - name: required_roles
+        type: array<string>
+        description: "필요한 역할 목록 (OR 조건)"
+        example: ["admin", "meeting_manager"]
+
+      - name: fallback
+        type: component
+        required: false
+        description: "권한 없을 때 표시할 대체 컴포넌트"
+
+      - name: action
+        type: enum
+        values: [hide, disable, redirect]
+        default: hide
+        description: "권한 없을 때 동작"
+
+    logic:
+      check: user.role in required_roles
+      if_true: render children
+      if_false: |
+        - action == "hide": return null
+        - action == "disable": render disabled state
+        - action == "redirect": redirect to /login
+
+    examples:
+      - id: vod_register_button
+        component: button
+        label: "VOD 등록"
+        required_roles: [admin, meeting_manager]
+        action: hide
+
+      - id: delete_button
+        component: button
+        label: "삭제"
+        required_roles: [admin]
+        action: disable
+        fallback: "관리자 권한 필요"
+
+  # ============================================
+  # 로그인 상태 UI
+  # ============================================
+  - id: login_status_widget
+    name: 로그인 상태 위젯
+    type: component
+    scope: [header, sidebar]
+    description: "사이드바 하단 또는 헤더의 로그인/로그아웃 UI"
+
+    states:
+      not_authenticated:
+        display:
+          - avatar: user_icon
+          - label: "로그인"
+          - click_action: navigate(/login)
+
+      authenticated:
+        display:
+          - avatar: user_avatar_url
+          - label: "{{ user.name }}"
+          - dropdown_menu:
+              - item: "프로필"
+                action: navigate(/profile)
+              - item: "계정 설정"
+                action: navigate(/settings)
+              - divider
+              - item: "로그아웃"
+                action: logout
+                style: danger
+
+    props:
+      - name: position
+        type: enum
+        values: [header, sidebar_bottom, navbar]
+        default: sidebar_bottom
+
+      - name: show_avatar
+        type: boolean
+        default: true
+
+      - name: show_name
+        type: boolean
+        default: true
+
+    data_source:
+      resource: users
+      field: current_user
+
+    events:
+      - event: logout
+        action: clear_token, redirect(/)
+
+  # ============================================
+  # AI 요약 카드
+  # ============================================
+  - id: ai_summary_card
+    name: AI 요약 카드
+    type: card
+    scope: [S-01, S-16]
+    description: "회의 AI 요약 미리보기 카드"
+
+    props:
+      - name: meeting_id
+        type: string
+        required: true
+
+      - name: meeting_title
+        type: string
+        required: true
+
+      - name: show_full_button
+        type: boolean
+        default: true
+
+      - name: show_regenerate
+        type: boolean
+        default: true
+
+      - name: truncate_length
+        type: number
+        default: 150
+
+    content:
+      - heading: "{{ meeting_title }} AI 요약"
+      - summary_text:
+          content: "{{ summary.content | truncate(truncate_length) }}"
+          loading: "요약을 생성하고 있습니다..."
+          empty: "요약이 없습니다"
+      - timestamp: "{{ summary.generated_at | time_ago }} 생성"
+      - actions:
+          - button:
+              label: "전체 요약 보기"
+              variant: primary
+              event: open_modal(ai_summary_modal, meeting_id)
+          - button:
+              label: "재생성"
+              variant: secondary
+              event: regenerate_summary
+
+    styling:
+      background: linear-gradient(135deg, #F0F9FF 0%, #F3E8FF 100%)
+      border: "2px solid #3B82F6"
+      padding: 20px
+      border_radius: 12px
+      margin_top: 20px
+
+  # ============================================
+  # AI 요약 로딩 스켈레톤
+  # ============================================
+  - id: ai_summary_skeleton
+    name: AI 요약 로딩 스켈레톤
+    type: component
+    scope: [S-01, S-04, S-16, M-02]
+    description: "AI 요약 로딩 중 표시 스켈레톤"
+
+    content:
+      - skeleton_line: 100% width, 20px height
+      - skeleton_line: 95% width, 14px height
+      - skeleton_line: 90% width, 14px height
+      - skeleton_line: 100% width, 14px height
+      - skeleton_line: 80% width, 14px height
+
+    animation: pulse 2s infinite
+
+  # ============================================
+  # 맥락 선택 모달
+  # ============================================
+  - id: context_selector_modal
+    name: 맥락 선택 모달 (AI용)
+    type: modal
+    scope: [S-01, S-04, S-14]
+    description: "AI 질문의 맥락으로 회의/의안 선택"
+
+    layout:
+      width: 500px
+      height: 400px
+      tabs:
+        - tab: 회의 검색
+          content: meeting_search_list
+        - tab: 의안 검색
+          content: bill_search_list
+
+    features:
+      - search_input: "회의명/의안명 검색"
+      - date_filter: "최근 30일, 3개월, 1년"
+      - quick_select: "최근 5개 (최근 선택순)"
+      - clear_context: "맥락 해제" button
+
+    events:
+      - event: select_meeting
+        action: set_context(meeting_id), close_modal
+      - event: select_bill
+        action: set_context(bill_id), close_modal
+
+  # ============================================
+  # 소스 카드 (참고 문서)
+  # ============================================
+  - id: source_card
+    name: 소스 카드 (AI 응답 참고)
+    type: card
+    scope: [S-14, S-04]
+    description: "AI 응답의 참고 문서 (회의/의안/자막) 카드"
+
+    variants:
+      meeting:
+        fields: [title, meeting_date, speaker, snippet]
+        icon: video
+        click_action: navigate(/vod/:id)
+
+      bill:
+        fields: [bill_number, title, proposer, committee, status]
+        icon: document
+        click_action: navigate(/bills/:id)
+
+      subtitle:
+        fields: [speaker, text, start_time]
+        icon: quote
+        click_action: navigate(/vod/:meeting_id?t=:start_time)
+
+    styling:
+      border: "1px solid #E5E7EB"
+      padding: 12px
+      border_radius: 8px
+      margin_top: 8px
+      cursor: pointer
+      hover:
+        background: "#F9FAFB"
+        border_color: "#3B82F6"
+
+  # ============================================
+  # AI 인디케이터
+  # ============================================
+  - id: ai_indicator
+    name: AI 처리 중 인디케이터
+    type: component
+    scope: all
+    description: "AI가 응답/처리 중임을 표시"
+
+    states:
+      loading:
+        display: spinner + "AI가 처리하고 있습니다..."
+
+      thinking:
+        display: animated_dots + "생각 중..."
+
+      complete:
+        display: checkmark + "완료"
+
+    animation:
+      type: pulse | dots_bounce | waveform
+      duration: 1.5s
+      infinite: true
+
+  # ============================================
+  # 에러 바운더리
+  # ============================================
+  - id: error_boundary
+    name: 에러 바운더리
+    type: wrapper
+    scope: all
+    description: "AI/네트워크 에러 처리"
+
+    error_states:
+      - type: network_error
+        display: "네트워크 연결을 확인해주세요"
+        action: "재시도" button
+
+      - type: auth_error
+        display: "인증이 필요합니다"
+        action: navigate(/login)
+
+      - type: rate_limit
+        display: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요"
+        wait_time: 60s
+
+      - type: ai_error
+        display: "응답 생성 중 오류가 발생했습니다"
+        action: "다시 시도" button
+
+    fallback:
+      render: error_message
+      show_support: true
+      show_logs: dev_mode only
+
+# ============================================
+# 스타일 시스템
+# ============================================
+design_tokens:
+  colors:
+    ai_primary: "#3B82F6"
+    ai_secondary: "#8B5CF6"
+    ai_success: "#10B981"
+    ai_warning: "#F59E0B"
+    ai_error: "#EF4444"
+
+  spacing:
+    ai_panel_width: 320px
+    ai_modal_width: 600px
+    ai_card_padding: 20px
+
+  typography:
+    ai_heading: "20px, bold"
+    ai_body: "14px, regular"
+    ai_caption: "12px, light"
+
+# ============================================
+# 접근성 (a11y)
+# ============================================
+accessibility:
+  role_guard:
+    aria_disabled: "required_roles not met"
+
+  ai_chat_panel:
+    aria_label: "AI 어시스턴트 채팅"
+    focus_trap: true
+    keyboard_navigation: true
+
+  ai_summary_card:
+    aria_label: "회의 AI 요약"
+    role: region
+    aria_live: polite
+
+# ============================================
+# 성능 최적화
+# ============================================
+performance:
+  ai_chat_panel:
+    virtual_scroll: true
+    message_limit: 50 (load on scroll)
+    lazy_load: true
+
+  ai_summary_card:
+    skeleton_loading: true
+    cache_ttl: 24h
+
+  source_card:
+    lazy_load_metadata: true
+    image_optimization: true
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+test_cases:
+  - name: AI 채팅 패널 열기/닫기
+    given: 로그인한 사용자, 홈 페이지
+    when: AI 아이콘 클릭
+    then: 우측 패널 슬라이드 열림, 포커스 패널로 이동
+
+  - name: 역할 기반 가드 (hide)
+    given: 권한 없는 사용자
+    when: 페이지 로드
+    then: 권한 필요 컴포넌트 숨김
+
+  - name: 역할 기반 가드 (disable)
+    given: 권한 없는 사용자
+    when: 페이지 로드
+    then: 권한 필요 컴포넌트 비활성화 + fallback 메시지
+
+  - name: 로그인 상태 UI (미인증)
+    given: 로그인 안 함
+    when: 사이드바 하단
+    then: "로그인" 버튼 표시
+
+  - name: 로그인 상태 UI (인증)
+    given: 로그인함
+    when: 사이드바 하단
+    then: 사용자명 + 프로필 드롭다운 표시
+
+  - name: 소스 카드 클릭
+    given: AI 응답 내 회의 참고 카드
+    when: 카드 클릭
+    then: /vod/:id로 이동
+
+  - name: 에러 바운더리 (네트워크)
+    given: 네트워크 에러
+    when: AI 요청 실패
+    then: 에러 메시지 + "재시도" 버튼

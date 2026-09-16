@@ -1,0 +1,260 @@
+/* 공통 토큰·컴포넌트 — 정본(design/)의 **바이트 동일 복사본**이다. 직접 고치면
+   드리프트 검사(D1)에서 걸린다. QR 로그인 화면(.ggc-qr §11)이 여기 있고,
+   10개 서비스가 같은 화면을 노출한다. @import 는 다른 규칙보다 앞서야 한다.
+   (2026-08-22 QR 화면 수렴) */
+@import "./ggc-tokens.css";
+@import "./ggc-components.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== KRDS Design Tokens (CSS Variables) =====
+ * KRDS(대한민국 정부 디자인시스템) 토큰 — 인라인 var(--krds-*) 사용 가능
+ * gac-* 는 의회 정체성(로고/골드 액센트) 용도로 유지
+ */
+:root {
+  /* KRDS Primary (정부 블루) */
+  --krds-primary: #256ef4;
+  --krds-primary-light: #4c87f6;
+  --krds-primary-dark: #0b50d0;
+  --krds-primary-5: #ecf2fe;
+  --krds-primary-10: #d8e5fd;
+  --krds-primary-30: #86aff9;
+  /* KRDS Semantic */
+  --krds-success: #228738;
+  --krds-danger: #de3412;
+  --krds-warning: #9e6a00;
+  --krds-warning-bg: #ffb114;
+  --krds-warning-dark: #805600; /* 경고 틴트 배경 위 소형 텍스트용 (AA 4.5:1 확보) */
+  --krds-info: #0b78cb;
+  /* GAC Brand (의회 정체성 — 로고/골드 액센트 전용) */
+  --gac-dark-blue: #3C5D89;
+  --gac-blue: #0099CC;
+  --gac-gray: #7D7D7D;
+  --gac-silver: #999999;
+  --gac-gold: #AD8B3A;
+  --gac-navy-900: #1E3358;
+  --gac-navy-800: #2A4670;
+  --gac-navy-50: #EEF3FA;
+  --gac-blue-50: #E6F4FB;
+  --gac-blue-100: #CDE9F6;
+  /* Ink scale — KRDS 회색 램프 */
+  --ink-900: #1e2124;
+  --ink-800: #33363d;
+  --ink-700: #464c53;
+  --ink-600: #58616a;
+  --ink-500: #6d7882;
+  --ink-400: #8a949e;
+  --ink-300: #b1b8be;
+  --ink-200: #cdd1d5;
+  --ink-100: #e6e8ea;
+  --ink-50: #f4f5f6;
+  /* Semantic 별칭 (KRDS 값) */
+  --live-red: #de3412;
+  --warn-amber: #9e6a00;
+  --ok-green: #228738;
+  /* Party */
+  --party-dem: #0047A0;
+  --party-pp: #E61E2B;
+  --party-speaker: #3C5D89;
+}
+
+/* ===== Base Styles — KRDS Light Theme ===== */
+@layer base {
+  * {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: var(--font-pretendard), 'Pretendard', system-ui, -apple-system,
+      BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    color: #1e2124;
+    background-color: #ffffff;
+    line-height: 1.5;
+  }
+
+  /* 포커스 스타일 (접근성) — KRDS Primary */
+  :focus-visible {
+    outline: 2px solid #256ef4;
+    outline-offset: 2px;
+  }
+
+  /* 링크 기본 스타일 — KRDS */
+  a {
+    color: #256ef4;
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: #0b50d0;
+  }
+}
+
+/* ===== Typography ===== */
+@layer components {
+  /* 자막 텍스트 스타일 */
+  .subtitle-text {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #1e2124;
+  }
+
+  /* 현재 재생 중인 자막 — KRDS Primary 액센트 */
+  .subtitle-current {
+    background-color: rgba(37, 110, 244, 0.08);
+    border-left: 3px solid #256ef4;
+  }
+
+  /* 검색 하이라이트 (highlight 토큰 유지) */
+  .subtitle-highlight {
+    background-color: #fef08a;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+
+  /* 자막 아이템 */
+  .subtitle-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e6e8ea;
+    cursor: pointer;
+    transition: background-color 0.15s;
+  }
+
+  .subtitle-item:hover {
+    background-color: #f4f5f6;
+  }
+
+  .subtitle-item.current {
+    background-color: rgba(37, 110, 244, 0.08);
+    border-left: 3px solid #256ef4;
+  }
+
+  /* 자막 시간 */
+  .subtitle-time {
+    font-family: 'JetBrains Mono', 'Source Code Pro', Consolas, monospace;
+    font-size: 12px;
+    color: #6d7882;
+  }
+}
+
+/* ===== Animations ===== */
+@layer utilities {
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .animate-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  /* GAC LIVE 배지 맥박 애니메이션 */
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  .animate-live-pulse {
+    animation: livePulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .hover-lift {
+    transition: all 0.2s ease-in-out;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+}
+
+/* ===== Scrollbar Styles (Light) ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f4f5f6;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cdd1d5;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8a949e;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cdd1d5 #f4f5f6;
+}
+
+.subtitle-list {
+  scroll-behavior: smooth;
+}
+
+/* ===== Sidebar ===== */
+.border-l-3 {
+  border-left-width: 3px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ===== 로그인 화면 (/transcribe/login) =====
+ * 셸은 정본 `.ggc-login > .ggc-card`(ggc-components.css §11 끝)가 전부 갖는다 —
+ * 여기서는 그 카드 **아래에 붙는 두 줄**만 다룬다. 카드 폭·2단 배치·모바일 압축은
+ * 정본 규칙이므로 이 파일에서 덮어쓰지 말 것(덮어쓰면 서비스마다 또 갈라진다).
+ *
+ * 배경: `.ggc-login` 은 배경색을 정하지 않는다(카드가 흰색이므로 뒤를 회색으로 깐다). */
+.ggc-login {
+  min-height: 100vh;
+  background: var(--ggc-bg);
+}
+/* 통합 로그인 버튼은 QR 블록 밖에 있으므로 위 간격을 직접 준다. */
+.tx-login-tail { margin-top: var(--ggc-space-5); }
+/* "비로그인으로 계속" — 카드 맨 아래 한 줄. */
+.tx-login-guest {
+  margin: var(--ggc-space-4) 0 0;
+  text-align: center;
+}
+/* 이 서비스만의 두 줄(통합 로그인·비로그인 계속)이 정본 셸보다 102px 더 높다.
+   세로가 짧은 휴대폰에서는 그 몫을 여기서 되돌려 준다 — 정본 규칙은 건드리지 않는다. */
+@media (max-width: 480px) and (max-height: 700px) {
+  .tx-login-tail { margin-top: var(--ggc-space-3); }
+  .tx-login-guest { margin-top: var(--ggc-space-2); }
+}

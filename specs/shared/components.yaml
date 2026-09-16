@@ -1,0 +1,258 @@
+# 공통 컴포넌트 정의
+version: "2.0"
+
+components:
+  # ============================================
+  # Header - 공통 헤더
+  # ============================================
+  header:
+    id: shared/header
+    type: layout
+    description: 모든 화면에서 사용하는 공통 헤더
+
+    props:
+      show_search:
+        type: boolean
+        default: false
+        description: 검색창 표시 여부
+
+      show_live_badge:
+        type: boolean
+        default: false
+        description: Live 배지 표시
+
+      show_vod_badge:
+        type: boolean
+        default: false
+        description: VOD 배지 표시
+
+      title:
+        type: string
+        default: null
+        description: 정적 제목
+
+      title_source:
+        type: string
+        default: null
+        description: 동적 제목 데이터 소스
+
+      show_register_button:
+        type: boolean
+        default: false
+        description: VOD 등록 버튼 표시
+
+    elements:
+      - id: logo
+        type: link
+        href: /
+        display: "경기도의회 자막"
+        events:
+          - on: click
+            do: navigate(/)
+
+      - id: title
+        type: text
+        condition: title || title_source
+        display: "{title || title_source}"
+
+      - id: live_badge
+        type: badge
+        condition: show_live_badge
+        variant: live
+        display: "Live"
+
+      - id: vod_badge
+        type: badge
+        condition: show_vod_badge
+        variant: secondary
+        display: "VOD"
+
+      - id: search_slot
+        type: slot
+        condition: show_search
+        description: 검색 컴포넌트 슬롯
+
+      - id: register_button
+        type: button
+        condition: show_register_button
+        label: "VOD 등록"
+        variant: primary
+        events:
+          - on: click
+            do: open_modal(vod_register)
+
+  # ============================================
+  # Toast - 토스트 알림
+  # ============================================
+  toast:
+    id: shared/toast
+    type: notification
+    description: 우하단 토스트 알림
+
+    position: bottom-right
+    auto_dismiss: 3000  # 3초
+
+    variants:
+      success:
+        icon: check-circle
+        color: "#16A34A"  # Success Green
+        background: "#DCFCE7"
+
+      error:
+        icon: x-circle
+        color: "#DC2626"  # Error Red
+        background: "#FEE2E2"
+
+      warning:
+        icon: exclamation-triangle
+        color: "#CA8A04"  # Warning Yellow
+        background: "#FEF9C3"
+
+      info:
+        icon: information-circle
+        color: "#2563EB"  # Primary
+        background: "#EFF6FF"
+
+    api:
+      show:
+        params: [variant, message]
+        description: 토스트 표시
+      hide:
+        description: 토스트 숨김
+
+  # ============================================
+  # Badge - 상태 배지
+  # ============================================
+  badge:
+    id: shared/badge
+    type: inline
+    description: 상태 표시 배지
+
+    variants:
+      live:
+        icon: dot-pulsing
+        color: "#DC2626"
+        background: "#FEE2E2"
+        animation: pulse
+
+      success:
+        icon: check
+        color: "#16A34A"
+        background: "#DCFCE7"
+
+      warning:
+        icon: clock
+        color: "#CA8A04"
+        background: "#FEF9C3"
+
+      secondary:
+        icon: folder
+        color: "#374151"
+        background: "#F3F4F6"
+
+  # ============================================
+  # Subtitle Item - 자막 아이템
+  # ============================================
+  subtitle_item:
+    id: shared/subtitle_item
+    type: list_item
+    description: 자막 히스토리 개별 아이템
+
+    props:
+      start_time:
+        type: float
+        format: time_hhmmss
+
+      text:
+        type: string
+
+      is_current:
+        type: boolean
+        default: false
+
+      highlight_query:
+        type: string
+        default: null
+
+    styles:
+      default:
+        padding: "12px 16px"
+        border_bottom: "1px solid #F3F4F6"
+        cursor: pointer
+        transition: "background-color 0.15s"
+
+      hover:
+        background: "#F9FAFB"
+
+      current:
+        background: "#EFF6FF"
+        border_left: "3px solid #2563EB"
+
+    elements:
+      - id: time
+        type: text
+        display: "{start_time | format:time_hhmmss}"
+        style:
+          font_family: "JetBrains Mono, monospace"
+          font_size: "12px"
+          color: "#6B7280"
+
+      - id: text
+        type: text
+        display: "{text | highlight:highlight_query}"
+        style:
+          font_size: "15px"
+          line_height: 1.5
+          color: "#111827"
+
+    events:
+      - on: click
+        emit: subtitle_click
+        payload: { start_time }
+
+  # ============================================
+  # Video Player Controls - 영상 컨트롤
+  # ============================================
+  video_controls:
+    id: shared/video_controls
+    type: layout
+    description: 영상 플레이어 컨트롤바
+
+    props:
+      player_type:
+        type: string
+        enum: [hls, mp4]
+
+      show_playback_rate:
+        type: boolean
+        default: false
+
+    elements:
+      - id: play_pause
+        type: button
+        icon: "{isPlaying ? 'pause' : 'play'}"
+        condition: player_type == "mp4"
+
+      - id: timeline
+        type: slider
+        min: 0
+        max: "{duration}"
+        value: "{currentTime}"
+        condition: player_type == "mp4"
+
+      - id: time_display
+        type: text
+        display: "{currentTime | format:hhmmss} / {duration | format:hhmmss}"
+        condition: player_type == "mp4"
+
+      - id: volume
+        type: slider
+        min: 0
+        max: 1
+        value: "{volume}"
+
+      - id: playback_rate
+        type: select
+        options: [1, 1.5, 2]
+        value: "{playbackRate}"
+        condition: show_playback_rate

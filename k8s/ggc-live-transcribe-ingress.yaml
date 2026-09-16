@@ -1,0 +1,63 @@
+# 외부 노출 (2단계 배포의 2단계) — 35-deploy.sh 가 EXPOSE=1 일 때만 apply 한다.
+# ⚠ 이 파일을 apply 하면 ACG 가 허용하는 모든 출발지에서 서비스에 닿는다.
+#   접근통제의 주 방어선은 NCP ACG(acg-poc-app 443 인바운드)다 — klipper-lb 가 SNAT 를
+#   하면 Traefik IPAllowList 는 소스 IP 를 못 보므로 ACG 를 먼저 좁힌다.
+#
+# IP 접속(SNI 없음) 환경에서는 entrypoints·tls 애노테이션이 없으면 TLS 라우터가 성립하지 않는다.
+# secure-headers 는 클러스터 공유 미들웨어 — 참조만 하고 절대 수정하지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ggc-live-transcribe-api
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: ggc-poc-secure-headers@kubernetescrd,ggc-poc-ggc-live-transcribe-strip-prefix@kubernetescrd
+spec:
+  ingressClassName: traefik
+  # 도메인(SNI) 접속에는 공인 와일드카드 인증서를 쓴다. host 없는 규칙은 IP 접속용으로
+  # 유지되며 기본(자체서명) 인증서로 서빙 — 문서 허브의 인증서 계약은 무변경.
+  tls:
+    - hosts: [aisub.ggc.go.kr]
+      secretName: ggc-wildcard-tls
+  rules:
+    - host: aisub.ggc.go.kr
+      http:
+        paths:
+          - { path: /transcribe/api, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+          - { path: /transcribe/ws, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+          - { path: /transcribe/health, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+    - http:
+        paths:
+          - { path: /transcribe/api, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+          - { path: /transcribe/ws, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+          - { path: /transcribe/health, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-api, port: { number: 80 } } } }
+---
+# web 은 basePath=/transcribe 로 빌드되므로 strip-prefix 를 걸지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ggc-live-transcribe-web
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: ggc-poc-secure-headers@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [aisub.ggc.go.kr]
+      secretName: ggc-wildcard-tls
+  rules:
+    - host: aisub.ggc.go.kr
+      http:
+        paths:
+          - { path: /transcribe, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-web, port: { number: 80 } } } }
+    - http:
+        paths:
+          - { path: /transcribe, pathType: Prefix, backend: { service: { name: ggc-live-transcribe-web, port: { number: 80 } } } }

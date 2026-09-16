@@ -1,0 +1,145 @@
+# 공통 타입 정의
+version: "2.0"
+
+# ============================================
+# 도메인 타입 (Domain Types)
+# ============================================
+types:
+  Meeting:
+    description: 회의 정보
+    fields:
+      id: uuid
+      title: string
+      meeting_date: date
+      stream_url: string | null
+      vod_url: string | null
+      status: MeetingStatus
+      duration_seconds: integer | null
+      created_at: datetime
+      updated_at: datetime
+
+  MeetingStatus:
+    description: 회의 상태
+    enum:
+      - scheduled   # 예정
+      - live        # 실시간 방송중
+      - processing  # 자막 생성중
+      - ended       # 종료 (자막 완료)
+
+  Subtitle:
+    description: 자막 데이터
+    fields:
+      id: uuid
+      meeting_id: uuid
+      start_time: float       # 초 단위
+      end_time: float         # 초 단위
+      text: string
+      speaker: string | null
+      confidence: float | null  # 0~1
+      created_at: datetime
+
+  Councilor:
+    description: 의원 정보
+    fields:
+      id: uuid
+      name: string
+      party: string | null
+      district: string | null
+      term: integer | null
+      is_active: boolean
+
+  DictionaryEntry:
+    description: 용어 교정 사전 항목
+    fields:
+      id: uuid
+      wrong_text: string
+      correct_text: string
+      category: DictionaryCategory | null
+      created_at: datetime
+
+  DictionaryCategory:
+    description: 사전 카테고리
+    enum:
+      - councilor  # 의원 이름
+      - term       # 의회 용어
+      - general    # 일반
+
+# ============================================
+# UI 타입 (UI Types)
+# ============================================
+ui_types:
+  ToastVariant:
+    enum: [success, error, warning, info]
+
+  BadgeVariant:
+    enum: [live, success, warning, secondary]
+
+  PlayerType:
+    enum: [hls, mp4]
+
+  LayoutType:
+    enum: [single-column, sidebar-main]
+
+# ============================================
+# API Response 타입
+# ============================================
+api_types:
+  PaginatedResponse:
+    generic: T
+    fields:
+      data: T[]
+      total: integer
+      page: integer
+      per_page: integer
+      has_next: boolean
+
+  ApiError:
+    fields:
+      error: string
+      message: string
+      status_code: integer
+
+# ============================================
+# WebSocket 메시지 타입
+# ============================================
+websocket_types:
+  SubtitleCreatedEvent:
+    fields:
+      type: "subtitle_created"
+      payload:
+        subtitle: Subtitle
+
+  MeetingStatusChangedEvent:
+    fields:
+      type: "meeting_status_changed"
+      payload:
+        meeting_id: uuid
+        status: MeetingStatus
+
+# ============================================
+# 포맷터 (Formatters)
+# ============================================
+formatters:
+  time_hhmmss:
+    description: 초를 HH:MM:SS 형식으로 변환
+    input: float
+    output: string
+    example: "3661.5 → 01:01:01"
+
+  duration_hhmmss:
+    description: 초를 HH:MM:SS 형식으로 변환 (재생시간용)
+    input: integer
+    output: string
+    example: "9015 → 2:30:15"
+
+  date:
+    description: ISO 날짜를 로컬 형식으로 변환
+    input: date
+    output: string
+    example: "2026-02-04 → 2026년 2월 4일"
+
+  highlight:
+    description: 텍스트 내 키워드 하이라이트
+    input: [string, string]  # text, query
+    output: string (HTML)
+    example: "'예산안 심의' + '예산' → '&lt;mark&gt;예산&lt;/mark&gt;안 심의'"

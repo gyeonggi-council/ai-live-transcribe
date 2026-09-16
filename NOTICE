@@ -1,0 +1,38 @@
+경기도의회 AI 실시간 자막 서비스 (ggc-ai-live-transcribe)
+Copyright 2026 Gyeonggi Provincial Council (경기도의회)
+
+이 저작물은 Apache License 2.0 으로 배포됩니다(LICENSE 참조).
+
+---
+
+## 함께 배포되는 제3자 저작물
+
+### 글꼴
+
+- **Pretendard** (`frontend/src/fonts/Pretendard-*.woff2`)
+  Copyright (c) 2021 Kil Hyung-jin, with Reserved Font Name Pretendard.
+  SIL Open Font License 1.1 — https://github.com/orioncactus/pretendard
+
+- **Pretendard GOV** (`frontend/src/fonts/PretendardGOV-*.subset.woff2`)
+  Pretendard 파생 글꼴로, 대한민국 정부 디지털 서비스(KRDS)용으로 배포됩니다.
+  SIL Open Font License 1.1 을 따릅니다.
+
+두 글꼴 모두 OFL 1.1 에 따라 자유롭게 사용·재배포할 수 있으나, **글꼴 자체를 판매할 수는 없습니다.**
+
+### 상표 — 이 라이선스로 이용할 수 없는 것
+
+- **경기도의회 CI·엠블럼·슬로건**(`frontend/public/ci/`) 및 소스에 포함된 경기도의회 명칭·표장은
+  **경기도의회의 상표**이며 Apache License 2.0 의 이용허락 대상이 아닙니다(라이선스 제6조).
+
+  다른 기관이 이 소프트웨어를 도입할 때는 **해당 기관의 CI 로 교체해야 합니다.**
+
+### 데이터
+
+- `backend/data/ggc_official_roster.json`, `backend/data/committee_rosters.json` 및
+  소스 주석·테스트·문서에 등장하는 의원 성명·발언은 **경기도의회가 공개한 회의 및 의원 정보**입니다.
+  다른 기관이 도입할 때는 해당 기관의 데이터로 교체하십시오.
+
+### 외부 서비스
+
+이 소프트웨어는 **OpenAI API**(음성 인식·요약·교정·임베딩)를 호출합니다.
+이용 기관이 자체 API 키를 준비해야 하며, OpenAI 의 이용약관과 요금이 적용됩니다.

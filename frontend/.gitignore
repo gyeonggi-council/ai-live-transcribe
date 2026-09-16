@@ -1,0 +1,7 @@
+.vercel
+.env*.local
+
+# 테스트/빌드 산출물
+playwright-report/
+test-results/
+*.exit

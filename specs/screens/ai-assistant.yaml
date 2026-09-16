@@ -1,0 +1,318 @@
+# S-14: AI 어시스턴트 (Phase 11)
+version: "2.0"
+
+screen:
+  id: S-14
+  name: AI 어시스턴트
+  route: /ai
+  layout: sidebar-main
+  auth_required: false
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: ai_conversations
+    alias: current_session
+    needs: [id, session_id, role, content, sources, created_at, metadata]
+    filters: { session_id: ":session_id" }
+    sort: { created_at: asc }
+    description: 현재 대화 세션 메시지 목록
+
+  - resource: ai_conversations
+    alias: user_sessions
+    needs: [session_id, title, created_at, updated_at, message_count]
+    filters: { user_id: ":user_id" }
+    sort: { updated_at: desc }
+    condition: auth_required
+    description: 로그인 사용자의 이전 대화 세션 목록
+
+  - resource: meetings
+    alias: meeting_context
+    needs: [id, title, meeting_date, status]
+    filters: { id: "?meeting_id" }
+    description: 질문 맥락의 회의 정보 (선택)
+
+  - resource: subtitles
+    alias: subtitle_context
+    needs: [id, text, speaker, start_time]
+    filters: { meeting_id: "?meeting_id" }
+    description: 회의 자막 컨텍스트 (선택)
+
+  - resource: bills
+    alias: bill_context
+    needs: [id, bill_number, title, committee, status]
+    filters: { bill_id: "?bill_id" }
+    description: 의안 컨텍스트 (선택)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: false
+
+  - id: session_sidebar
+    type: sidebar
+    position: sidebar
+    function: 이전 대화 세션 목록 표시 (로그인 시만)
+    visibility:
+      condition: auth_required && user_authenticated
+    data_source:
+      resource: user_sessions
+    item_template:
+      display: [title, updated_at_formatted, message_count]
+      click_action: load_session
+    actions:
+      - id: new_session
+        label: 새 대화
+        icon: plus
+        event: create_new_session
+      - id: clear_history
+        label: 이력 삭제
+        icon: trash
+        event: confirm_clear_all_sessions
+    events:
+      - on: click:session_item
+        do: load_session(session.session_id)
+
+  - id: conversation_panel
+    type: list
+    position: main
+    function: AI와의 대화 표시
+    data_source:
+      resource: current_session
+    item_template:
+      role_detection: "role" field
+      display:
+        user:
+          - avatar: user_icon
+          - bubble_align: right
+          - bubble_style: blue_bg
+          - content: text
+        assistant:
+          - avatar: ai_icon
+          - bubble_align: left
+          - bubble_style: gray_bg
+          - content: markdown_text
+          - sources: source_cards (if present)
+    auto_scroll: true
+    scroll_trigger: new_message
+    events:
+      - on: click:source_link
+        do: show_source_detail(source)
+
+  - id: source_card
+    type: card
+    position: conversation_item
+    function: AI 응답 내 참조 문서 표시
+    data_source:
+      resource: subtitles|bills|meetings
+      field: sources
+    displays:
+      meeting_reference:
+        fields: [title, meeting_date, speaker]
+        icon: video
+        click_action: navigate(/vod/:id)
+      bill_reference:
+        fields: [bill_number, title, proposer]
+        icon: document
+        click_action: navigate(/bills/:bill_id)
+      subtitle_reference:
+        fields: [speaker, text, start_time]
+        icon: quote
+        click_action: navigate(/vod/:meeting_id?t=:start_time)
+
+  - id: input_bar
+    type: form
+    position: footer
+    function: 질문 입력
+    fixed: true
+    fields:
+      - id: question_input
+        type: textarea
+        placeholder: "회의 내용에 대해 묻기... (Shift+Enter 줄바꿈, Enter 전송)"
+        max_length: 2000
+        rows: 2
+        auto_expand: true
+    actions:
+      - id: context_selector
+        type: button
+        label: 맥락
+        icon: link
+        variant: secondary
+        event: open_context_selector
+        tooltip: "회의/의안 선택 (선택사항)"
+      - id: send_button
+        type: button
+        label: 전송
+        icon: send
+        variant: primary
+        disabled_condition: question_input.empty
+        event: send_question
+        keyboard_shortcut: Enter
+    events:
+      - on: input:question_input
+        do: enable_send_button
+      - on: click:send_button
+        do: send_question(question_input.value, context?)
+      - on: keydown:Enter
+        do: send_question (if not Shift+Enter)
+
+  - id: context_selector
+    type: modal
+    function: 맥락 선택 (회의/의안)
+    layout: dialog
+    width: 500px
+    height: 400px
+    tabs:
+      - id: meetings_tab
+        label: 회의 검색
+        content: meeting_search_list
+      - id: bills_tab
+        label: 의안 검색
+        content: bill_search_list
+    events:
+      - on: select:meeting
+        do: set_context(meeting_id)
+      - on: select:bill
+        do: set_context(bill_id)
+
+  - id: empty_state
+    type: message
+    function: 초기 상태 표시 (대화 없음)
+    condition: current_session.length == 0
+    display:
+      title: "AI 어시스턴트"
+      subtitle: "회의 내용, 의안, 자막에 대해 물어보세요"
+      suggestions:
+        - "이 회의의 주요 결정사항은?"
+        - "어떤 의안이 논의되었나?"
+        - "'예산' 관련 발언 찾기"
+      note: "회원가입하여 대화 이력을 저장하세요"
+
+  - id: loading_indicator
+    type: spinner
+    position: main
+    function: AI 응답 생성 중 표시
+    condition: ai_response.loading
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  loading:
+    condition: current_session.loading
+    display: spinner + "대화를 불러오는 중..."
+
+  empty:
+    condition: current_session.length == 0 && auth_required
+    display:
+      title: "대화 이력 없음"
+      action:
+        label: "새 대화 시작"
+        event: create_new_session
+
+  error_response:
+    condition: ai_response.error
+    display:
+      message: "응답 생성 중 오류가 발생했습니다. 다시 시도해주세요."
+      action:
+        label: "재시도"
+        event: retry_send_question
+
+  not_found:
+    condition: session_id invalid
+    display:
+      message: "존재하지 않는 대화입니다."
+      action:
+        label: "홈으로"
+        event: navigate(/)
+
+# ============================================
+# 응답 속성
+# ============================================
+ai_response_config:
+  model: gpt-5-mini
+  system_prompt: |
+    당신은 경기도의회 회의 자료의 전문가입니다.
+    회의 자막, 의안, 회의록에 기반하여 정확하고 간결한 답변을 제공하세요.
+    항상 참고한 출처를 명시하세요.
+  max_tokens: 1000
+  temperature: 0.7
+
+# ============================================
+# 데이터 저장 (로그인 시)
+# ============================================
+persistence:
+  condition: auth_required && user_authenticated
+  save_on: send_question
+  fields: [session_id, message_id, role, content, sources, metadata]
+  retention: unlimited
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: /
+    - from: /vod/:id
+      context: meeting_id
+    - from: /bills/:bill_id
+      context: bill_id
+  outgoing:
+    - to: /vod/:id
+      trigger: click:meeting_source
+    - to: /bills/:bill_id
+      trigger: click:bill_source
+    - to: /
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 비로그인 질문
+    when: 로그인하지 않은 상태에서 질문 입력
+    then:
+      - 질문 전송 가능
+      - AI 응답 표시
+      - 세션 사이드바 미표시
+      - "회원가입" 권유 메시지
+
+  - name: 로그인 세션 이력
+    when: 로그인한 사용자, 이전 대화 세션 클릭
+    then:
+      - 해당 세션 대화 로드
+      - 사이드바에서 세션 하이라이트
+      - 새 질문 입력 가능
+
+  - name: 참조 문서 링크
+    when: AI 응답에 회의/의안 참조 있음
+    then:
+      - 참조 문서 카드 표시
+      - 카드 클릭 시 해당 페이지로 이동 (맥락 유지)
+
+  - name: 맥락 선택
+    when: "맥락" 버튼 클릭
+    then:
+      - 회의/의안 선택 모달 열림
+      - 선택 시 질문 맥락 설정
+      - 이후 응답은 선택된 맥락 활용
+
+  - name: 빈 입력 전송 방지
+    when: 입력 없이 Enter 키
+    then:
+      - 전송 버튼 비활성화
+      - 아무 동작 없음
+
+  - name: Shift+Enter 줄바꿈
+    when: Shift+Enter 입력
+    then:
+      - 입력창에 줄바꿈 추가 (전송 안됨)

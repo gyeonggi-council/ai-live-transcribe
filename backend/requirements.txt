@@ -1,0 +1,55 @@
+# FastAPI 프레임워크
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# 데이터 검증
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+
+# 데이터베이스
+sqlalchemy>=2.0.30
+psycopg>=3.2.0
+psycopg-binary>=3.2.0
+
+# Supabase
+supabase>=2.10.0
+
+# HTTP 클라이언트
+httpx>=0.28.0
+aiohttp>=3.11.0
+
+# 파일 업로드 (multipart/form-data)
+python-multipart>=0.0.9
+
+# hwpx(한글) 전자회의록 생성 — 손수 만든 OWPML이 모바일 한컴오피스에서 "암호화" 오탐(-41003)으로
+# 안 열려, 한컴 호환 hwpx를 생성하는 유지보수 라이브러리로 교체. 순수 파이썬(추가 전이의존성 없음).
+pyhwpxlib>=0.18.3
+
+# 수치 계산 — 화자 임베딩 융합(speaker_voice_fusion)이 직접 쓴다. (예전엔 kiwipiepy 전이의존이었다;
+# kiwipiepy 는 2026-09-05 기준 앱 어디에서도 import 되지 않아 제거 — 상주 메모리 ~1GB 회수)
+numpy>=1.26
+
+# 화자 임베딩 (VOD 음성 화자 융합) — onnxruntime 내장, torch 불필요. 모델 파일은 Dockerfile 이 굽는다.
+# ★모델(ONNX)과 런타임을 함께 검증했으므로 == 로 핀. 올릴 때는 docs/speaker-accuracy-eval-2026-09.md 의
+#   EER 실험을 다시 돌린다(scripts/eval_voice_calibration.py).
+sherpa-onnx==1.13.7
+
+# OpenAI API (실시간 전사 gpt-realtime-whisper + 화자구분 gpt-4o-transcribe-diarize + 교정)
+openai>=2.20.0
+
+# 인증 (JWT + bcrypt)
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+
+# 개발 도구
+python-dotenv>=1.0.1
+
+# 테스트
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+
+# 린터 및 포매터
+ruff>=0.8.0
+black>=24.10.0
+mypy>=1.13.0

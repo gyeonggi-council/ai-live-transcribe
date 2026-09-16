@@ -1,0 +1,20 @@
+# 최초 SSL 발급 전 임시 설정 (bootstrap)
+#
+# 파일명에서 .disabled 확장자를 제거하고 원래 api.conf를 백업한 뒤
+# 이 파일을 활성화하면 certbot HTTP-01 challenge가 통과됩니다.
+# init-ssl.sh 스크립트가 자동으로 이 토글을 처리.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 200 "SSL bootstrap — waiting for Let's Encrypt\n";
+        add_header Content-Type text/plain;
+    }
+}

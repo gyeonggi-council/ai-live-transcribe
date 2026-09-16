@@ -1,0 +1,190 @@
+# S-01: 홈 대시보드
+version: "2.0"
+
+screen:
+  id: S-01
+  name: 홈 대시보드
+  route: /
+  layout: single-column
+  auth_required: false
+  auth_optional: true
+  note: "비로그인 접근 가능, 로그인 시 AI 대화 이력 저장 (Phase 11)"
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: meetings
+    alias: live_meeting
+    needs: [id, title, meeting_date, stream_url, status]
+    filters: { status: live }
+    description: 현재 실시간 진행 중인 회의
+
+  - resource: meetings
+    alias: recent_vods
+    needs: [id, title, meeting_date, vod_url, status, duration_seconds]
+    filters: { status: [processing, ended], limit: 5 }
+    sort: { meeting_date: desc }
+    description: 최근 VOD 5개
+
+  - resource: ai_conversations
+    alias: live_summary
+    needs: [id, content, meeting_id, generated_at]
+    filters: { meeting_id: ":live_meeting.id", type: "summary" }
+    sort: { generated_at: desc }
+    limit: 1
+    description: 생중계 회의 AI 실시간 요약 (Phase 11)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: false
+
+  - id: live_meeting_card
+    type: card
+    position: main
+    function: 현재 실시간 회의 상태 표시
+    data_source:
+      resource: live_meeting
+    states:
+      - name: broadcasting
+        condition: live_meeting exists
+        display: [live_badge, title, watch_button]
+      - name: no_broadcast
+        condition: live_meeting null
+        display: [no_meeting_message]
+    events:
+      - on: click:watch_button
+        do: navigate(/live)
+        condition: status == "live"
+
+  - id: recent_vod_list
+    type: list
+    position: main
+    function: 최근 VOD 목록 표시
+    data_source:
+      resource: recent_vods
+    item_template:
+      display: [meeting_date, title, duration_formatted, subtitle_status_badge]
+    events:
+      - on: click:item
+        do: navigate(/vod/{item.id})
+
+  - id: ai_summary_card
+    type: card
+    position: main
+    function: 생중계 회의 AI 실시간 요약 (Phase 11)
+    visibility:
+      condition: live_meeting exists && live_summary exists
+    margin_top: 30px
+    data_source:
+      resource: live_summary
+    content:
+      - heading: "{{ live_meeting.title }} AI 요약"
+      - summary_preview: "{{ live_summary.content | truncate(150) }}"
+      - timestamp: "{{ live_summary.generated_at | time_ago }} 생성"
+      - button:
+          label: "전체 요약 보기"
+          variant: primary
+          event: open_modal(ai_summary, meeting_id: live_meeting.id)
+
+  - id: vod_actions
+    type: button_group
+    position: main
+    buttons:
+      - id: view_all
+        label: 전체보기
+        event: navigate(/vod)
+      - id: register_vod
+        label: VOD 등록
+        variant: primary
+        event: open_modal(vod_register)
+        visibility:
+          condition: user.role in [meeting_manager, admin]
+
+  - id: ai_chat_panel
+    type: panel
+    position: aside
+    function: AI 어시스턴트 우측 고정 패널 (Phase 11)
+    fixed: true
+    width: 320px
+    height: 100vh
+    background: white
+    border_left: "1px solid #E5E7EB"
+    resizable: true
+    min_width: 250px
+    max_width: 500px
+    visibility:
+      condition: ai_assistant_enabled
+    ref: shared/ai_chat_panel
+    props:
+      compact: true
+      show_history: false
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  outgoing:
+    - to: /live
+      trigger: click:watch_button
+      condition: live_meeting.status == "live"
+    - to: /vod
+      trigger: click:view_all
+    - to: /vod/:id
+      trigger: click:vod_item
+    - to: modal:vod_register
+      trigger: click:register_vod
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 초기 로드 (방송 없음)
+    when: 페이지 접속, 실시간 회의 없음
+    then:
+      - "예정된 회의가 없습니다" 메시지 표시
+      - 최근 VOD 목록 표시 (최대 5개)
+
+  - name: 초기 로드 (방송 중)
+    when: 페이지 접속, 실시간 회의 있음
+    then:
+      - Live 배지 + 회의 제목 표시
+      - "실시간 시청하기" 버튼 활성화
+
+  - name: VOD 항목 클릭
+    when: VOD 항목 클릭
+    then: /vod/:id 페이지로 이동
+
+  - name: VOD 등록 버튼 클릭
+    when: "VOD 등록" 버튼 클릭, 권한: meeting_manager 이상
+    then: VOD 등록 모달 열림
+
+  - name: AI 요약 카드 표시 (Phase 11)
+    when: 생중계 회의 존재 && AI 요약 생성됨
+    then:
+      - 요약 미리보기 (150자 이하) 표시
+      - "전체 요약 보기" 버튼 활성화
+      - "{{ live_meeting.title }} AI 요약" 제목
+
+  - name: 권한 기반 UI 차이
+    when: 비관리자 사용자
+    then:
+      - "VOD 등록" 버튼 숨김
+      - 다른 기능은 동일
+
+  - name: AI 채팅 패널 (Phase 11)
+    when: 페이지 접속
+    then:
+      - 우측 고정 AI 채팅 패널 표시 (width: 320px)
+      - 회의 맥락 기반 AI 질문 가능
+      - 로그인 시 이력 저장

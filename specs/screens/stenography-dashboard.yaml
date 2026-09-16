@@ -1,0 +1,379 @@
+# S-16: 속기 관리 대시보드 (Phase 11)
+version: "2.0"
+
+screen:
+  id: S-16
+  name: 속기 관리 대시보드
+  route: /stenography
+  layout: sidebar-main
+  auth_required: true
+  required_roles: [stenographer, admin]
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: stenography_records
+    alias: draft_records
+    needs: [id, meeting_id, status, stenographer_name, created_at, updated_at]
+    filters: { status: "draft" }
+    sort: { created_at: asc }
+    description: 작업 대기열 (초안 상태)
+
+  - resource: stenography_records
+    alias: in_progress_records
+    needs: [id, meeting_id, status, stenographer_name, created_at, updated_at, progress]
+    filters: { status: "submitted" }
+    sort: { updated_at: desc }
+    description: 진행 중 목록
+
+  - resource: stenography_records
+    alias: completed_records
+    needs: [id, meeting_id, status, stenographer_name, created_at, updated_at, completion_date]
+    filters: { status: "approved" }
+    sort: { completion_date: desc }
+    description: 완료 목록 (읽기 전용)
+
+  - resource: meetings
+    alias: meeting_info
+    needs: [id, title, meeting_date, duration_seconds, status]
+    join: stenography_records.meeting_id
+    description: 회의 정보 (제목, 날짜)
+
+  - resource: stenography_lines
+    alias: line_count
+    needs: [id]
+    join: stenography_records.id
+    aggregate: count
+    description: 각 속기록별 라인 수
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: false
+
+  - id: stats_summary
+    type: card_grid
+    position: main
+    function: 상단 통계 요약
+    cards:
+      - id: draft_count
+        label: "작업 대기"
+        value: "{{ draft_records.length }}"
+        icon: hourglass
+        color: orange
+        click_action: scroll_to(draft_section)
+
+      - id: in_progress_count
+        label: "진행 중"
+        value: "{{ in_progress_records.length }}"
+        icon: spinner
+        color: blue
+        click_action: scroll_to(in_progress_section)
+
+      - id: completed_count
+        label: "완료"
+        value: "{{ completed_records.length }}"
+        icon: check_circle
+        color: green
+        click_action: scroll_to(completed_section)
+
+      - id: total_lines
+        label: "총 라인 수"
+        value: "{{ sum(line_count) }}"
+        icon: list
+        color: gray
+        tooltip: "모든 속기록 라인 합계"
+
+  - id: work_queue_section
+    type: container
+    position: main
+    margin_top: 30px
+
+  - id: work_queue_header
+    type: heading
+    position: work_queue_section
+    level: 2
+    text: "작업 대기열"
+    icon: tasks
+    subtitle: "{{ draft_records.length }}개 (초안)"
+
+  - id: work_queue_table
+    type: table
+    position: work_queue_section
+    function: 초안 속기록 대기열
+    data_source:
+      resource: draft_records
+    empty_state:
+      display: "새로운 작업이 없습니다"
+    columns:
+      - id: meeting_title
+        label: "회의명"
+        width: "35%"
+        sortable: true
+        render: "{{ meeting_info.title }}"
+      - id: meeting_date
+        label: "회의 날짜"
+        width: "20%"
+        sortable: true
+        render: "{{ meeting_info.meeting_date | date_format }}"
+      - id: created_at
+        label: "생성일"
+        width: "15%"
+        sortable: true
+        render: "{{ created_at | time_ago }}"
+      - id: line_count
+        label: "라인 수"
+        width: "12%"
+        render: "{{ line_count }}"
+      - id: actions
+        label: ""
+        width: "18%"
+        render: action_buttons
+
+  - id: work_queue_row_action
+    type: button_group
+    position: work_queue_table
+    buttons:
+      - id: edit_button
+        label: "편집"
+        variant: primary
+        icon: pencil
+        event: navigate(/vod/:meeting_id/stenography/:id/edit)
+      - id: delete_button
+        label: "삭제"
+        variant: danger
+        icon: trash
+        event: confirm_delete_record
+
+  - id: in_progress_section
+    type: container
+    position: main
+    margin_top: 40px
+
+  - id: in_progress_header
+    type: heading
+    position: in_progress_section
+    level: 2
+    text: "진행 중"
+    icon: arrows-right-left
+    subtitle: "{{ in_progress_records.length }}개 (검수 중)"
+
+  - id: in_progress_list
+    type: list
+    position: in_progress_section
+    function: 진행 중인 속기록 목록
+    data_source:
+      resource: in_progress_records
+    empty_state:
+      display: "검수 대기 중인 속기록이 없습니다"
+    item_template:
+      display:
+        - id: meeting_card
+          type: card
+          elevation: 1
+          padding: 20px
+          border_left: "4px solid #3B82F6"
+          content:
+            - heading: "{{ meeting_info.title }}"
+            - meeting_date: "{{ meeting_info.meeting_date | date_format }}"
+            - progress_info: "라인 {{ line_count }} | 업데이트: {{ updated_at | time_ago }}"
+            - submitter: "제출자: {{ stenographer_name }}"
+            - progress_bar:
+                value: 100
+                label: "검수 대기 중"
+            - button:
+                label: "상세보기"
+                event: navigate(/vod/:meeting_id)
+
+  - id: completed_section
+    type: container
+    position: main
+    margin_top: 40px
+
+  - id: completed_header
+    type: heading
+    position: completed_section
+    level: 2
+    text: "완료"
+    icon: check_circle
+    subtitle: "{{ completed_records.length }}개 (승인됨)"
+
+  - id: completed_list
+    type: list
+    position: completed_section
+    function: 완료된 속기록 (읽기 전용)
+    data_source:
+      resource: completed_records
+    empty_state:
+      display: "완료된 속기록이 없습니다"
+    item_template:
+      display:
+        - id: completed_card
+          type: card
+          elevation: 0
+          padding: 20px
+          border_left: "4px solid #10B981"
+          opacity: 0.8
+          content:
+            - heading: "{{ meeting_info.title }}"
+            - meeting_date: "{{ meeting_info.meeting_date | date_format }}"
+            - info: "라인 {{ line_count }} | 완료: {{ completion_date | date_format }}"
+            - submitter: "작성자: {{ stenographer_name }}"
+            - status_badge:
+                label: "승인됨"
+                variant: success
+            - button:
+                label: "조회 (읽기전용)"
+                event: navigate(/vod/:meeting_id/stenography/:id)
+                disabled: false
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 모달
+# ============================================
+modals:
+  - id: delete_confirmation
+    type: dialog
+    title: "속기록 삭제"
+    message: "이 속기록을 삭제하시겠습니까? 삭제된 내용은 복구할 수 없습니다."
+    buttons:
+      - label: "취소"
+        variant: secondary
+        event: close_modal
+      - label: "삭제"
+        variant: danger
+        event: delete_record
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  loading:
+    condition: records.loading
+    display: spinner + "속기록을 불러오는 중..."
+
+  empty:
+    condition: draft_records.length == 0 && in_progress_records.length == 0 && completed_records.length == 0
+    display:
+      message: "속기록이 없습니다"
+      action:
+        label: "회의 선택"
+        event: navigate(/vod)
+
+  error:
+    condition: records.error
+    display:
+      message: "속기록을 불러올 수 없습니다. 다시 시도해주세요."
+      action:
+        label: "새로고침"
+        event: reload_page
+
+# ============================================
+# 필터 및 정렬
+# ============================================
+filtering:
+  enabled: true
+  filters:
+    - id: stenographer_filter
+      label: "작성자"
+      type: dropdown
+      options_from: stenography_records.stenographer_name
+      multi_select: true
+    - id: date_range_filter
+      label: "회의 날짜"
+      type: date_range
+      default: last_30_days
+  sort_by: created_at
+  sort_order: desc
+
+# ============================================
+# 권한 기반 표시
+# ============================================
+access_control:
+  edit_button:
+    condition: user.role in [stenographer, admin]
+  delete_button:
+    condition: user.role == admin || (user.role == stenographer && record.stenographer_name == current_user.name)
+  completed_section:
+    view_only: true
+    condition: user.role == stenographer && record.stenographer_name != current_user.name
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: /vod/:id
+      condition: route contains /stenography
+  outgoing:
+    - to: /vod/:id/stenography/:id/edit
+      trigger: click:edit_button
+    - to: /vod/:id
+      trigger: click:back_button
+    - to: /vod/:id/stenography/:id
+      trigger: click:view_button
+
+# ============================================
+# 배경 작업
+# ============================================
+background_tasks:
+  - id: status_refresh
+    interval: 30s
+    action: refresh_record_list
+    targets: [draft_records, in_progress_records]
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 초기 로드
+    when: /stenography 페이지 접속
+    then:
+      - 권한 확인 (stenographer 또는 admin만)
+      - draft_records 목록 로드
+      - in_progress_records 목록 로드
+      - completed_records 목록 로드
+      - 통계 카운트 계산 및 표시
+
+  - name: 작업 대기열에서 편집 진입
+    when: work_queue_table에서 "편집" 버튼 클릭
+    then:
+      - /vod/:id/stenography/:record_id/edit 로 이동
+      - 속기 편집기 페이지 로드
+      - 해당 속기록의 라인 편집 시작
+
+  - name: 완료 목록 읽기전용
+    when: completed_section에서 "조회" 버튼 클릭
+    then:
+      - /vod/:id/stenography/:record_id 페이지 로드
+      - 모든 편집 기능 비활성화
+      - 읽기 전용 모드 표시
+
+  - name: 속기록 삭제
+    when: work_queue에서 "삭제" 버튼 클릭
+    then:
+      - 확인 모달 표시
+      - 삭제 확인 시 DB에서 삭제
+      - 테이블에서 행 제거
+      - 토스트: "삭제되었습니다" 표시
+
+  - name: 필터링
+    when: 작성자 필터 적용
+    then:
+      - 해당 작성자의 속기록만 표시
+      - 통계 카운트 업데이트
+
+  - name: 배경 새로고침
+    when: 30초 경과
+    then:
+      - draft_records 및 in_progress_records 자동 새로고침
+      - 새 작업이 있으면 대기열 업데이트

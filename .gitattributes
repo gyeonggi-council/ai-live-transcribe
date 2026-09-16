@@ -1,0 +1,9 @@
+# Windows(autocrlf=true) 체크아웃에서도 서버 실행 파일은 LF 를 유지한다.
+# CRLF 로 체크아웃된 .sh 가 원격 bash 에서 "\r': command not found" 로 죽는 사고 예방.
+*.sh    text eol=lf
+*.sql   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.py    text eol=lf
+Dockerfile      text eol=lf
+Containerfile   text eol=lf

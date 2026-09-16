@@ -1,0 +1,256 @@
+# S-04: VOD 뷰어
+version: "2.0"
+
+screen:
+  id: S-04
+  name: VOD 뷰어
+  route: /vod/:id
+  layout: sidebar-main  # 70% main / 30% sidebar
+  auth_required: false
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: meetings
+    alias: vod_meeting
+    needs: [id, title, meeting_date, vod_url, status, duration_seconds]
+    params: { id: ":id" }
+    description: VOD 회의 정보
+
+  - resource: subtitles
+    alias: all_subtitles
+    needs: [id, start_time, end_time, text, speaker]
+    filters: { meeting_id: ":id" }
+    sort: { start_time: asc }
+    description: 해당 VOD의 전체 자막
+
+  - resource: ai_conversations
+    alias: vod_summary
+    needs: [id, content, model_used, generated_at]
+    filters: { meeting_id: ":id", type: "summary" }
+    sort: { generated_at: desc }
+    limit: 1
+    description: VOD 회의의 AI 요약 (Phase 11)
+
+  - resource: ai_conversations
+    alias: vod_qa
+    needs: [id, role, content, created_at]
+    filters: { meeting_id: ":id", type: "qa" }
+    sort: { created_at: asc }
+    description: 이 회의에 대한 Q&A 대화 (Phase 11)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: shared
+    ref: shared/header
+    props:
+      show_search: true
+      show_vod_badge: true
+      title_source: vod_meeting.title
+
+  - id: video_player
+    type: video
+    position: main
+    function: MP4 재생
+    data_source:
+      resource: vod_meeting
+      field: vod_url
+    player_type: mp4
+    controls:
+      - play_pause
+      - timeline
+      - volume
+      - playback_rate
+      - time_display
+    playback_rates: [1, 1.5, 2]
+    events:
+      - on: timeupdate
+        do: highlight_current_subtitle(all_subtitles, currentTime)
+      - on: error
+        do: show_error_state
+
+  - id: subtitle_panel
+    type: list
+    position: sidebar
+    function: 전체 자막 히스토리 표시
+    data_source:
+      resource: all_subtitles
+    auto_scroll: true
+    scroll_trigger: current_subtitle_change
+    item_template:
+      display: [time_formatted, text]
+      highlight_field: text
+      highlight_trigger: search_query
+      current_indicator:
+        condition: item.start_time <= currentTime < item.end_time
+        style: current_subtitle
+    events:
+      - on: click:item
+        do: video_player.seek(item.start_time)
+
+  - id: search_input
+    type: search
+    position: header
+    function: 자막 키워드 검색
+    target: subtitle_panel
+    highlight_color: "#FEF08A"
+    events:
+      - on: input
+        do: highlight_matches(subtitle_panel, query)
+      - on: clear
+        do: clear_highlights(subtitle_panel)
+
+  - id: ai_panel
+    type: sidebar
+    position: sidebar_bottom
+    function: AI 요약/Q&A 패널 (Phase 11)
+    visibility:
+      condition: ai_enabled
+    collapsible: true
+    collapsed_default: false
+    header:
+      title: "AI 도움"
+      icon: sparkles
+    content:
+      - id: ai_summary_section
+        type: container
+        content:
+          - heading: "회의 요약"
+          - summary_text: "{{ vod_summary.content | truncate(200) }}"
+          - button:
+              label: "전체 보기"
+              variant: primary
+              size: small
+              event: open_modal(ai_summary, meeting_id: vod_meeting.id)
+          - button:
+              label: "재생성"
+              variant: secondary
+              size: small
+              icon: refresh_cw
+              event: regenerate_vod_summary
+
+      - id: ai_qa_section
+        type: container
+        margin_top: 20px
+        content:
+          - heading: "질문하기"
+          - input_field:
+              type: textarea
+              placeholder: "이 회의에 대해 물어보세요..."
+              rows: 2
+          - button:
+              label: "전송"
+              variant: primary
+              size: small
+              event: send_ai_question
+              context: { meeting_id: vod_meeting.id }
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: /
+      via: click:vod_item
+    - from: /vod
+      via: click:vod_row
+  outgoing:
+    - to: /
+      trigger: click:logo
+    - to: /vod
+      trigger: back_button
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  loading:
+    condition: all_subtitles.loading
+    display: spinner + "자막을 불러오는 중..."
+
+  processing:
+    condition: vod_meeting.status == "processing"
+    display:
+      message: "자막을 생성하고 있습니다..."
+      progress_bar: true
+      note: "잠시 후 새로고침해주세요"
+
+  no_subtitles:
+    condition: all_subtitles.length == 0 && vod_meeting.status != "processing"
+    display:
+      message: "자막이 아직 생성되지 않았습니다."
+      action:
+        label: "자막 생성하기"
+        event: trigger_subtitle_generation
+
+  not_found:
+    condition: vod_meeting == null
+    display:
+      message: "존재하지 않는 VOD입니다."
+      action:
+        label: "홈으로"
+        event: navigate(/)
+
+  error_video:
+    condition: video_player.error
+    display: "영상을 불러올 수 없습니다."
+
+# ============================================
+# 현재 자막 하이라이트 스타일
+# ============================================
+styles:
+  current_subtitle:
+    background: "#EFF6FF"  # blue-50
+    border_left: "3px solid #2563EB"  # primary
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 초기 로드
+    when: /vod/:id 접속
+    then:
+      - VOD 정보 로드
+      - 전체 자막 로드
+      - MP4 재생 준비
+
+  - name: 영상 재생 → 자막 동기화
+    when: 영상 재생 중 (currentTime = 65초)
+    then:
+      - 65초에 해당하는 자막 파란 테두리 하이라이트
+      - 자막 패널 자동 스크롤
+
+  - name: 자막 클릭 → 시점 이동
+    when: 자막 항목 클릭 (start_time = 120초)
+    then: 영상이 120초로 이동
+
+  - name: 키워드 검색
+    when: 검색창에 "조례" 입력
+    then: 자막 텍스트에서 "조례" 노란색 하이라이트
+
+  - name: 자막 생성 중 상태
+    when: status == "processing"
+    then: 프로그레스바 + 안내 메시지 표시
+
+  - name: AI 요약 패널 표시 (Phase 11)
+    when: /vod/:id 접속, AI 요약 생성됨
+    then:
+      - 우측 사이드바에 AI 요약 섹션 표시
+      - "전체 보기" 버튼 클릭 시 AI 요약 모달 (M-02) 열림
+      - "재생성" 버튼으로 새 요약 생성 가능
+
+  - name: AI Q&A 입력 (Phase 11)
+    when: 우측 사이드바 "질문하기" 입력 → 전송
+    then:
+      - 질문 전송
+      - AI 응답 로드
+      - vod_qa 리스트 업데이트
+      - 응답 표시 (chat-style bubble)

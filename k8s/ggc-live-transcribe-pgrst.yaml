@@ -1,0 +1,125 @@
+# PostgREST 브리지 — Supabase 클라우드 절단용 (2026-08-18 설계, 계획 lively-wondering-tulip)
+#
+# supabase-py(>=2.10)가 {SUPABASE_URL}/rest/v1 로 호출하는 것을 그대로 받아
+# poc-db(ggcpoc.subtitle)로 서빙한다. 백엔드 코드 무변경으로 클라우드가 런타임에서 빠진다.
+# 근거: 전 코드베이스 .rpc()/.storage/Supabase auth/Realtime/임베디드 조인 사용 0건 (실측).
+#
+# - 노출: ClusterIP 만. Ingress 없음(클러스터 내부 전용).
+# - 인증: PGRST_JWT_SECRET(HS256) 필수. anon role 미설정 → 무토큰/무효토큰 전부 거부.
+#   백엔드의 SUPABASE_KEY = {role:"ggc_subtitle"} 클레임의 HS256 JWT (컷오버 스크립트가 민팅).
+# - shim: supabase-py 의 /rest/v1 프리픽스를 벗기는 nginx-unprivileged 사이드카.
+#   PostgREST 공식 이미지는 scratch 기반(셸 없음)이라 probe 는 tcpSocket 을 쓴다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ggc-live-transcribe-pgrst-shim
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      client_max_body_size 20m;
+      location = /healthz { return 200 "ok"; }
+      location /rest/v1/ {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass http://127.0.0.1:3000/;
+      }
+      location / { return 404; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ggc-live-transcribe-pgrst
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-pgrst
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ggc-live-transcribe-pgrst
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ggc-live-transcribe-pgrst
+        app.kubernetes.io/part-of: ggc-poc
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgrest
+          image: docker.io/postgrest/postgrest:v12.2.12
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3000, name: pgrst }]
+          env:
+            - name: PGRST_DB_URI
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-pgrst, key: PGRST_DB_URI } }
+            - name: PGRST_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-pgrst, key: PGRST_JWT_SECRET } }
+            - { name: PGRST_DB_SCHEMAS, value: "subtitle" }
+            - { name: PGRST_DB_POOL, value: "5" }
+            - { name: PGRST_DB_CHANNEL_ENABLED, value: "false" }
+            # anon role 은 의도적으로 미설정 — JWT 없는 요청은 전부 거부된다.
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          startupProbe:
+            tcpSocket: { port: pgrst }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket: { port: pgrst }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+        - name: shim
+          image: docker.io/nginxinc/nginx-unprivileged:1.29-alpine
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8080, name: http }]
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: shim-conf, mountPath: /etc/nginx/conf.d }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+      volumes:
+        - name: shim-conf
+          configMap: { name: ggc-live-transcribe-pgrst-shim }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ggc-live-transcribe-pgrst
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: ggc-live-transcribe-pgrst }
+  ports: [{ name: http, port: 8080, targetPort: http }]

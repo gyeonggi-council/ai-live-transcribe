@@ -1,0 +1,459 @@
+# Phase A: 실행부만 k3s 이관 (DB_BACKEND=supabase 유지) → Phase B: DB_BACKEND=postgres 컷오버.
+# Apply only after the runtime Secret is created from an authorized source.
+#
+# NCP PoC(poc-app, 단일 노드) 적용 시 주의:
+# - Ingress 는 35-deploy.sh 의 EXPOSE=1 플래그로만 apply 한다 (2단계 노출).
+# - 이미지 태그는 소스 해시 기반(YYYYMMDD-HHMM-<해시8>). latest 금지.
+# - _template 표준 대비 명시적 예외: E1 CPU 2000m, E2 MEM 3Gi, E3 uploads PVC,
+#   E4 web+api 2-Deployment, E5 grace 60s, E6 probe 경로 앱 계약(/health 등),
+#   E7 전용 Secret 의 DATABASE_URL. 근거는 deploy/ncp/README 와 .ggc-deploy/state.json.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ggc-live-transcribe-uploads
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-api
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+# 라이브 오디오 mp3 녹음(48kbps CBR ≈ 21MB/h) — uploads 와 분리(14일 보존이 5Gi 를 잠식 방지).
+# STT 켠 채널만 녹음(2026-08-18 사용자 결정), 1~2채널×14일 ≈ 1~2GB, 10Gi 면 5배 여유.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ggc-live-transcribe-recordings
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-api
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+# 발언영상 클립 저장소(2026-09-03 클립 워크벤치). 보존 7일 AND 8GiB.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ggc-live-transcribe-clips
+  namespace: ggc-poc
+  labels:
+    # 클러스터에 이미 이 라벨로 만들어져 있다(2026-09-03 직접 생성). 맞춰 둔다.
+    app.kubernetes.io/name: ggc-live-transcribe
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+# VOD 작업용 임시공간(2026-09-05). emptyDir 이었으나 파드 축출을 세 번 냈다 —
+# emptyDir 은 파드 ephemeral-storage 상한(2Gi)에 포함되는데, 3~5시간 회의 VOD 는
+# 3.2~4.5GB 라 자동 자막이 돌 때마다 상한을 넘겨 kubelet 이 파드를 죽였다
+# (09-04 04:07 · 09-05 04:02 · 09-05 09:37). PVC 로 옮기면 그 예산 밖이고,
+# local-path 는 데이터 디스크(/dev/vdb)라 kubelet 이 감시하는 루트도 건드리지 않는다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ggc-live-transcribe-tmp
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-api
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ggc-live-transcribe-api
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-api
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  # 단일 writer(프로세스 로컬 STT 세션·WS 팬아웃) + RWO PVC — 롤아웃 중 api 2개 공존 시
+  # 이중 STT 가 가능하므로 Recreate 로 고정한다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ggc-live-transcribe-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ggc-live-transcribe-api
+        app.kubernetes.io/part-of: ggc-poc
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      # /tmp 가 PVC 라 재시작해도 내용이 남는다. emptyDir 시절의 "파드가 뜨면 빈 /tmp"
+      # 성질을 유지해, 강제 종료로 남은 수 GB 짜리 VOD 조각이 쌓이지 않게 한다.
+      initContainers:
+        - name: tmp-clean
+          image: localhost/ggc-live-transcribe-api:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +"]
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi, ephemeral-storage: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi, ephemeral-storage: 256Mi }
+      containers:
+        - name: api
+          image: localhost/ggc-live-transcribe-api:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8000, name: http }]
+          env:
+            - { name: TZ, value: "Asia/Seoul" }
+            - { name: PORT, value: "8000" }
+            - { name: DEBUG, value: "false" }
+            # 방송 시작 감지 → 자동 STT. 2026-08-22 사용자 결정으로 켰다.
+            # 껐던 이유(Railway 프로덕션이 같은 Supabase 를 봐서 이중 STT·이중 과금)는
+            # 컷오버(08-18)와 Railway 소멸로 사라졌다. 끄면 방송이 열려도 자막이 안 나오고
+            # 화면에 수동 시작 버튼이 없어 아무도 모른 채 방송이 끝난다.
+            - { name: STT_AUTO_START, value: "true" }
+            # 동시 STT 채널 상한 = 코드 기본값 14 (상임위 13 + 본회의 동시 커버).
+            # ★2 로 묶어두면 상임위가 여럿 열리는 날 두 곳 빼고 전부 자막이 안 나온다.
+            #   8이던 2026-07-21 에 실제로 그 사고가 났다(시청자 50명 채널이 정회 속개 때
+            #   시청자 0명 채널에 슬롯을 뺏김) — 그 교훈으로 14가 된 값이다. 낮추지 말 것.
+            # 비용: 채널당 ~$0.4/시간, 최악(전 상임위 동시) ~$5.6/시간.
+            - { name: STT_MAX_CONCURRENT_CHANNELS, value: "14" }
+            # 라이브 오디오 mp3 녹음 저장 위치 — readOnlyRootFS 라 PVC 마운트 필수.
+            - { name: LIVE_RECORD_DIR, value: "/app/recordings" }
+            # 발언영상 클립 보존 — 7일 AND 8GiB 중 먼저 걸리는 쪽 (2026-09-03).
+            - { name: CLIP_STORE_DIR, value: "/app/clips" }
+            - { name: CLIP_STORE_MAX_BYTES, value: "8589934592" }
+            - { name: CLIP_STORE_TTL_DAYS, value: "7" }
+            # 추출 잡 동시 1개 — 생중계 STT 와 같은 파드라 순차로 (코드 기본 2, 2026-09-08 사용자 요청 "서버 부하 없게")
+            - { name: CLIP_JOB_MAX_ACTIVE, value: "1" }
+            # KMS 최근회의영상 자동 등록 주기(분) — 등록 자체는 AI 비용 0. 코드 기본값과 같지만
+            # 운영자가 매니페스트에서 이 루프의 존재를 알 수 있도록 명시한다 (2026-09-03).
+            # 60 → 30 (2026-09-10 사용자 결정) — 등록 직후 AI 자막 생성이 이어지므로 주기가 곧 대기 시간.
+            - { name: KMS_AUTO_REGISTER_INTERVAL_MINUTES, value: "30" }
+            # VOD 등록 직후 AI 자막 자동 생성 (2026-09-03 새벽 1회 → 2026-09-10 "VOD 가 등록되면 바로").
+            # 등록 루프가 한 바퀴 돌 때마다 최근 3일·subtitle_stage none/draft 회의를 하루(KST) 최대 10건
+            # 순차 생성(관리자 버튼과 같은 큐, 자동으로 시도한 회의는 그날 다시 안 잡는다). 결과는 알림
+            # (notifications, type=vod_auto_stt — 생성했을 때만)과 GET /api/admin/vod-auto-stt/status.
+            # 회의당 ~$0.4 → 하루 최대 $4.
+            - { name: VOD_AUTO_STT_ENABLED, value: "true" }
+            - { name: VOD_AUTO_STT_DAILY_LIMIT, value: "10" }
+            - { name: VOD_AUTO_STT_MAX_AGE_DAYS, value: "3" }
+            # 요약 미리 만들기 (2026-09-15 담당자 결정) — AI 자막이 끝난 최근 30일 회의 중 요약이 없는 것을 10분마다 골라
+            # 하루(KST) 최대 10건 순서대로 요약해 둔다(담당자가 누르는 요약 한도 20건과 따로 센다). services/summary_pregen.
+            # 끄려면 ENABLED 만 false.
+            - { name: SUMMARY_PREGEN_ENABLED, value: "true" }
+            - { name: SUMMARY_PREGEN_DAILY_LIMIT, value: "10" }
+            - { name: SUMMARY_PREGEN_MAX_AGE_DAYS, value: "30" }
+            # 뜻으로 찾기(벡터+키워드 혼합, 2026-09-15 "회의 내용을 벡터화") — migration 036 subtitle_chunks 가 먼저 있어야 한다.
+            # 조각 임베딩 채우기는 생중계 중이면 쉰다. 첫날 밀린 약 110회의를 채우려 하루 150건(회의당 약 $0.02).
+            # 끄려면 RAG_VECTOR_ENABLED 만 false(키워드 검색으로 돌아간다).
+            - { name: RAG_VECTOR_ENABLED, value: "true" }
+            - { name: EMBED_PREGEN_ENABLED, value: "true" }
+            - { name: EMBED_PREGEN_DAILY_LIMIT, value: "150" }
+            # 에이전트형 대화(2026-09-15) — 첫 발췌로 모자라면 AI 가 도구로 자막을 더 찾아 읽는다(최대 3바퀴). 끄면 한 번 답 경로.
+            - { name: AI_AGENT_ENABLED, value: "true" }
+            # VOD 음성 화자 융합 (2026-09-05) — 텍스트 화자귀속 뒤 자막 창별 화자 임베딩(CPU 워커, nice 10)으로
+            # 교정. 속기 대조 3회의: 위원 발언 일치율 74~82% → 97~98%. 회의당 CPU 3~4분. 끄면 텍스트 결과 그대로.
+            - { name: VOD_VOICE_SPEAKER_FUSION, value: "true" }
+            # 라이브 배치 창 전사 모델 (2026-09-08 사용자 결정, gpt-4o-transcribe → gpt-transcribe).
+            # 근거: 393회 본회의 일문일답 구간에서 4o 가 한쪽 화자를 버려 CER 25~46%, gpt-transcribe 11~18%
+            # (단독 발언은 ±1%p, 단가 −25%). docs/stt-accuracy-eval-2026-09.md 09-08 절. 되돌리려면 이 줄만.
+            - { name: LIVE_BATCH_MODEL, value: "gpt-transcribe" }
+            # 라이브 창 12→10초 · 조기 flush 최소 6→5초 (2026-09-14 창 길이 실험, docs/live-sync-eval-2026-09.md §4).
+            # 본회의 2·3차 전체 + 상임위 1시간에서 CER −0.1/+0.2/−0.1%p(청크 승패 4/2·3/3)로 손해 없이 자막 준비 지연 p99 14.2→12.0초.
+            # 8초 창은 +0.4~1.3%p 에 진 청크가 이긴 청크의 3~9배라 기각(사용자 결정 없이는 쓰지 않는다). 되돌리려면 두 줄 삭제(코드 기본 12/6).
+            - { name: LIVE_BATCH_WINDOW_SECONDS, value: "10" }
+            - { name: LIVE_BATCH_MIN_FLUSH_SECONDS, value: "5" }
+            # /live 영상 지연 목표(초, 라이브 엣지 기준) = ceil(sync_need_p99 + 1). 채널 상태 응답으로 프런트가
+            # 마운트 전에 받는다(2026-09-14 — 그 전엔 웹 이미지에 20 이 구워져 있어 조정마다 재빌드였다).
+            # 첫 값 17 = ceil(창 10 의 ready_lag_p99(시뮬) 12.3 + 수집 지연 3(실측 전 가정) + 여유 1). 첫 실제 회의 뒤
+            # `kubectl logs … | grep sync_need` 로 회의 전체 p99 를 재고 내린다(edge_lag 실측이 1.5~2 면 15~16).
+            # 값 변경 = 파드 재시작 = 정회 때만. 너무 낮으면 자막이 몇 초 늦게 우르르 뜬다(붕괴 아님) — 다음 정회에 올린다.
+            - { name: LIVE_SYNC_TARGET_SEC, value: "17" }
+            # 영상추출기(exe) 배포 채널 재개 (2026-09-08 사용자 결정 — 09-03 "설치형 중단" 을 되돌림).
+            # version.json 의 다운로드 절대주소는 이 값으로 만든다 — Traefik 이 /transcribe 를 벗긴 뒤라
+            # request.base_url 로는 접두어가 빠져 404 가 난다. 인증서가 유효한 도메인을 쓴다.
+            - { name: PUBLIC_BASE_URL, value: "https://aisub.ggc.go.kr/transcribe" }
+            - { name: DB_BACKEND, value: "supabase" }
+            - { name: CORS_ORIGINS, value: '["https://__PUBLIC_IP__","https://aisub.ggc.go.kr"]' }
+            # 의회망 대역 — 로그인 없는 발언영상·AI(2026-09-11). 값은 저장소에 두지 않는다(공인 IP 와 같은 원칙):
+            # 클러스터에서 한 번 만든다 → kubectl -n ggc-poc create configmap ggc-live-transcribe-council
+            #   --from-literal=COUNCIL_NETWORK_RANGES='a.b.c.d-e,...'   (없으면 기능만 꺼지고 파드는 뜬다)
+            - name: COUNCIL_NETWORK_RANGES
+              valueFrom: { configMapKeyRef: { name: ggc-live-transcribe-council, key: COUNCIL_NETWORK_RANGES, optional: true } }
+            # 접속처 이름표 — 접속 통계가 IP 를 이름으로 바꿀 때만 쓴다(IP 는 저장하지 않는다, 2026-09-16).
+            #   --from-literal=COUNCIL_SITE_LABELS='이름=a.b.c.d-e,a.b.c.f; 다른이름=...'  (없으면 전부 '외부')
+            - name: COUNCIL_SITE_LABELS
+              valueFrom: { configMapKeyRef: { name: ggc-live-transcribe-council, key: COUNCIL_SITE_LABELS, optional: true } }
+            # 로그인을 요구할 대역 — 이 대역의 비로그인 방문자에게 "모바일 의정지원서비스 앱으로 로그인" 안내를 띄운다
+            # (2026-09-16 담당자 결정 — 그 전에는 Traefik 이 아예 차단했다). 비면 아무에게도 요구하지 않는다.
+            - name: LOGIN_REQUIRED_RANGES
+              valueFrom: { configMapKeyRef: { name: ggc-live-transcribe-council, key: LOGIN_REQUIRED_RANGES, optional: true } }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: DATABASE_URL, optional: true } }
+            - name: SUPABASE_URL
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: SUPABASE_URL, optional: true } }
+            - name: SUPABASE_KEY
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: SUPABASE_KEY, optional: true } }
+            # pgrst 브리지는 subtitle 스키마만 노출한다(PGRST_DB_SCHEMAS). 클라우드 Supabase 로
+            # 롤백(25b 원복)하면 이 값도 public 으로 되돌려야 한다.
+            - name: SUPABASE_SCHEMA
+              value: "subtitle"
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: openai-api, key: OPENAI_API_KEY } }
+            # 플랫폼 통합 로그인(ggc-sso) 내부 introspection/mint 주소 — 비우면 SSO 배선 전체가
+            # 조용히 꺼진다(GGC_LOGIN_BASE_URL 관례와 같다). Ingress 없는 내부 Service 다.
+            - { name: GGC_SSO_INTERNAL_URL, value: "http://ggc-sso-internal.ggc-poc.svc.cluster.local:8081" }
+            # 문서 엔진(ggc_doc = kordoc) — 부서별 문서 HWPX(모니터링·자료요구 목록·표지·보도자료, 2026-09-15). Ingress 없는 내부 Service.
+            # 토큰 Secret 이 없으면 문서 만들기만 503 이고 파드는 뜬다(optional).
+            - { name: GGC_DOC_INTERNAL_URL, value: "http://ggc-doc-internal.ggc-poc.svc.cluster.local:8100" }
+            - name: GGC_DOC_TOKEN
+              valueFrom: { secretKeyRef: { name: ggc-doc-runtime, key: DOC_TOKEN, optional: true } }
+            - name: JWT_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: JWT_SECRET_KEY } }
+            - name: ADMIN_QUICK_PIN
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: ADMIN_QUICK_PIN } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            runAsNonRoot: true
+          volumeMounts:
+            - { name: uploads, mountPath: /app/uploads }
+            - { name: recordings, mountPath: /app/recordings }
+            - { name: clips, mountPath: /app/clips }
+            # 영상추출기 설치파일·manifest.json (tool_release_service.RELEASE_DIR = /app/data/tools/extractor).
+            # 루트 fs 가 읽기전용이라 볼륨 없이는 업로드가 EROFS 로 죽고, 있어도 재배포 때 사라진다 →
+            # clips PVC 의 별도 하위 폴더(subPath tools)를 빌려 쓴다. clip_store 정리는 jobs/·work/ 만 본다.
+            - { name: clips, mountPath: /app/data/tools, subPath: tools }
+            - { name: tmp, mountPath: /tmp }
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 45
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+          resources:
+            # STT 1~2채널: ffmpeg 실시간 오디오 디코딩(채널당 ~5%) + 배치 STT 12초 창 +
+            # VOD 처리 시 화자 임베딩 워커(서브프로세스, ~250MB, 회의당 3~4분). kiwipiepy 는 2026-09-05 제거.
+            # ephemeral-storage 2Gi 는 로그·쓰기가능 레이어 몫뿐이다 — 루트 fs 는 읽기전용이고
+            # 수 GB 를 쓰는 VOD 임시파일은 2026-09-05 부터 tmp PVC 로 나갔다. 되돌리지 말 것.
+            requests: { cpu: 500m, memory: 1Gi, ephemeral-storage: 512Mi }
+            limits: { cpu: "2", memory: 3Gi, ephemeral-storage: 2Gi }
+      volumes:
+        - name: uploads
+          persistentVolumeClaim: { claimName: ggc-live-transcribe-uploads }
+        - name: recordings
+          persistentVolumeClaim: { claimName: ggc-live-transcribe-recordings }
+        - name: clips
+          persistentVolumeClaim: { claimName: ggc-live-transcribe-clips }
+        - name: tmp
+          persistentVolumeClaim: { claimName: ggc-live-transcribe-tmp }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ggc-live-transcribe-api
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: ggc-live-transcribe-api }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+# 자동 클립 작업자 (2026-09-10 사용자 결정) — AI 자막이 끝난 회의의 의원 전원 발언 영상을 720p 로 미리 잘라 둔다.
+# api 파드(생중계 STT)와 **떼어 둔** 이유: 회의 1건 인코딩이 1코어 약 43분이다. 같은 파드에 두면 CPU·메모리 한도를
+# 생중계와 나눠 쓴다. 여기서는 k8s 가 cpu 1·mem 1Gi 로 묶으므로 폭주·OOM 이 나도 이 파드만 재시작된다.
+# 같은 api 이미지, command 만 다르다. Service·Ingress 없음(아무도 여기에 접속하지 않는다 — DB 큐만 본다).
+# 파일은 api 와 같은 clips PVC(local-path, 단일 노드라 RWO 여도 두 파드가 함께 마운트)에 쓰고 api 가 내려준다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ggc-live-transcribe-clipper
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-clipper
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  # 큐 소비자는 하나여야 한다(같은 자동 잡을 둘이 자르지 않게) — 롤아웃 중에도 둘이 겹치지 않게 Recreate
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ggc-live-transcribe-clipper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ggc-live-transcribe-clipper
+        app.kubernetes.io/part-of: ggc-poc
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: clipper
+          image: localhost/ggc-live-transcribe-api:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.workers.auto_clip_worker"]
+          env:
+            - { name: TZ, value: "Asia/Seoul" }
+            - { name: DB_BACKEND, value: "supabase" }
+            - name: SUPABASE_URL
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: SUPABASE_URL, optional: true } }
+            - name: SUPABASE_KEY
+              valueFrom: { secretKeyRef: { name: ggc-live-transcribe-runtime, key: SUPABASE_KEY, optional: true } }
+            - { name: SUPABASE_SCHEMA, value: "subtitle" }
+            # 저장소는 api 와 같은 값이어야 한다 — 전체 8GiB 안에서 자동분 5GiB, 수동 클립은 자동 때문에 지우지 않는다
+            - { name: CLIP_STORE_DIR, value: "/app/clips" }
+            - { name: CLIP_STORE_MAX_BYTES, value: "8589934592" }
+            - { name: CLIP_STORE_TTL_DAYS, value: "7" }
+            - { name: CLIP_AUTO_ENABLED, value: "true" }           # 끄면 작업자는 대기만 한다(파드는 남는다)
+            - { name: CLIP_AUTO_MAX_AGE_DAYS, value: "2" }         # 최근 2일 AI 자막 완료 회의만
+            - { name: CLIP_AUTO_TTL_DAYS, value: "3" }             # 자동 클립 보관 3일
+            - { name: CLIP_AUTO_MAX_BYTES, value: "5368709120" }   # 자동분 예산 5GiB(≈ 회의 7건)
+            - { name: CLIP_AUTO_MIN_FREE_BYTES, value: "12884901888" }   # 노드 디스크 여유 12GiB 아래면 멈춤
+            - { name: CLIP_AUTO_CRF, value: "28" }                 # 720p H.264 — 원본의 17%(2026-09-10 실측)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            runAsNonRoot: true
+          volumeMounts:
+            - { name: clips, mountPath: /app/clips }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            # x264 veryfast 720p 1스레드 ≈ 1코어 · ~150MB, 파이썬 ~80MB(임포트 실측). 한도가 곧 서버 보호 장치다.
+            requests: { cpu: 100m, memory: 256Mi, ephemeral-storage: 64Mi }
+            limits: { cpu: "1", memory: 1Gi, ephemeral-storage: 512Mi }
+      volumes:
+        - name: clips
+          persistentVolumeClaim: { claimName: ggc-live-transcribe-clips }
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ggc-live-transcribe-web
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/name: ggc-live-transcribe-web
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ggc-live-transcribe-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ggc-live-transcribe-web
+        app.kubernetes.io/part-of: ggc-poc
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: localhost/ggc-live-transcribe-web:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3000, name: http }]
+          env:
+            - { name: TZ, value: "Asia/Seoul" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            runAsNonRoot: true
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+          startupProbe:
+            httpGet: { path: /transcribe/login, port: http }
+            periodSeconds: 2
+            failureThreshold: 45
+          readinessProbe:
+            httpGet: { path: /transcribe/login, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /transcribe/login, port: http }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 768Mi }
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 128Mi } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ggc-live-transcribe-web
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: ggc-live-transcribe-web }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ggc-live-transcribe-strip-prefix
+  namespace: ggc-poc
+  labels:
+    app.kubernetes.io/part-of: ggc-poc
+spec:
+  stripPrefix:
+    prefixes: [/transcribe]
+# Ingress 는 k8s/ggc-live-transcribe-ingress.yaml 로 분리했다 —
+# 35-deploy.sh 가 EXPOSE=1 일 때만 그 파일을 apply 한다(2단계 노출을 파일 단위로 강제).

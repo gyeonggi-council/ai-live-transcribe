@@ -1,0 +1,344 @@
+# M-02: AI 요약 모달 (Phase 11)
+version: "2.0"
+
+modal:
+  id: M-02
+  name: AI 요약 모달
+  type: dialog
+  triggers: [S-01, S-04, S-16]
+  auth_required: false
+
+# ============================================
+# 모달 설정
+# ============================================
+config:
+  width: 600px
+  height: auto
+  max_height: 80vh
+  padding: 30px
+  border_radius: 12px
+  background: white
+  box_shadow: 0 20px 60px rgba(0,0,0,0.15)
+  animation:
+    enter: slide-up 300ms ease-out
+    exit: slide-down 200ms ease-in
+  dismissible: true
+  backdrop_click: close
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: meetings
+    alias: meeting_info
+    needs: [id, title, meeting_date, status]
+    params: { id: ":meeting_id" }
+    description: 회의 정보 (제목, 날짜)
+
+  - resource: ai_conversations
+    alias: summary_response
+    needs: [id, content, model_used, generated_at, token_usage]
+    filters: { meeting_id: ":meeting_id", type: "summary" }
+    sort: { generated_at: desc }
+    limit: 1
+    description: 최신 AI 요약 응답
+
+  - resource: subtitles
+    alias: meeting_subtitles
+    needs: [id, text, speaker, start_time]
+    filters: { meeting_id: ":meeting_id" }
+    description: 회의 자막 (요약 재생성용 컨텍스트)
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: header
+    type: header
+    position: modal_header
+    function: 모달 헤더
+    content:
+      - id: title
+        type: heading
+        level: 2
+        text: "AI 요약"
+        styles:
+          font_size: 20px
+          font_weight: 600
+          color: "#1F2937"
+
+      - id: meeting_title_info
+        type: paragraph
+        text: "{{ meeting_info.title }}"
+        styles:
+          font_size: 14px
+          color: "#6B7280"
+          margin_top: 4px
+
+      - id: close_button
+        type: button
+        icon: x
+        variant: ghost
+        position: absolute top-4 right-4
+        event: close_modal
+
+  - id: loading_state
+    type: container
+    visibility:
+      condition: summary_response.loading
+    content:
+      - spinner
+      - message: "요약을 생성하고 있습니다..."
+
+  - id: summary_content
+    type: container
+    visibility:
+      condition: summary_response.content != null && !summary_response.loading
+    padding: 0 20px
+    content:
+      - id: summary_text
+        type: rich_text
+        function: AI 요약 본문
+        data_source:
+          resource: summary_response
+          field: content
+        markdown: true
+        styles:
+          font_size: 14px
+          line_height: 1.6
+          color: "#374151"
+          word_break: break-word
+
+      - id: model_info
+        type: caption
+        position: summary_content
+        text: "모델: {{ summary_response.model_used }} | 생성: {{ summary_response.generated_at | time_ago }}"
+        styles:
+          font_size: 12px
+          color: "#9CA3AF"
+          margin_top: 15px
+          padding_top: 15px
+          border_top: "1px solid #E5E7EB"
+
+  - id: empty_state
+    type: container
+    visibility:
+      condition: summary_response.content == null && !summary_response.loading
+    text_align: center
+    padding: 40px 20px
+    content:
+      - icon: lightbulb
+      - message: "아직 요약이 생성되지 않았습니다"
+      - subtitle: "아래 버튼을 눌러 요약을 생성해보세요"
+
+  - id: error_state
+    type: alert
+    visibility:
+      condition: summary_response.error
+    variant: error
+    title: "요약 생성 실패"
+    message: "{{ summary_response.error.message }}"
+    dismissible: true
+
+  - id: footer
+    type: footer
+    position: modal_footer
+    content:
+      - id: view_full_transcript
+        type: button
+        label: "전체 회의록 보기"
+        icon: file_text
+        variant: secondary
+        event: navigate(/vod/:meeting_id)
+        tooltip: "이 회의의 전체 자막 및 회의록"
+
+      - id: regenerate_button
+        type: button
+        label: "재생성"
+        icon: refresh_cw
+        variant: primary
+        event: regenerate_summary
+        loading_state: "생성 중..."
+        disabled_condition: summary_response.loading
+        tooltip: "새 요약 생성 (컨텍스트 재분석)"
+
+      - id: close_modal_button
+        type: button
+        label: "닫기"
+        variant: secondary
+        event: close_modal
+
+# ============================================
+# 이벤트 및 액션
+# ============================================
+events:
+  - id: open_modal
+    trigger: click_summary_card | click_ai_button
+    action: fetch_summary_response
+    params:
+      meeting_id: ":meeting_id"
+      include_latest: true
+
+  - id: regenerate_summary
+    trigger: click:regenerate_button
+    action: call_api
+    endpoint: POST /api/meetings/:meeting_id/summary/regenerate
+    params:
+      meeting_id: ":meeting_id"
+      subtitles: meeting_subtitles
+    on_success:
+      - update summary_response
+      - show toast: "요약이 재생성되었습니다"
+      - scroll_to_top
+    on_error:
+      - show error_state
+      - show toast: "요약 생성 실패. 다시 시도해주세요"
+
+  - id: close_modal
+    trigger: click:close_button | click:close_modal_button | backdrop_click
+    action: dismiss_modal
+    animation: slide-down 200ms
+
+  - id: view_full_transcript
+    trigger: click:view_full_transcript
+    action:
+      - navigate(/vod/:meeting_id)
+      - close_modal
+    params:
+      meeting_id: ":meeting_id"
+
+# ============================================
+# 요약 생성 설정
+# ============================================
+summary_config:
+  model: gpt-5-mini
+  system_prompt: |
+    당신은 경기도의회 회의 요약 전문가입니다.
+    회의 자막을 분석하여 다음을 포함한 간결한 요약을 작성하세요:
+    1. 회의 핵심 주제 및 목적 (1-2줄)
+    2. 주요 결정사항 (bullet points, 3-5개)
+    3. 주요 발언자 및 의견 (2-3명)
+    4. 다음 조치 사항 또는 합의사항 (1-2줄)
+
+    마크다운 포맷을 사용하세요.
+  max_tokens: 500
+  temperature: 0.7
+  caching_enabled: true
+  cache_ttl: 24h
+
+# ============================================
+# 스타일
+# ============================================
+styles:
+  header:
+    padding: 20px 30px
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)
+    color: white
+    border_radius: "12px 12px 0 0"
+
+  body:
+    padding: 30px
+    background: white
+    max_height: calc(80vh - 200px)
+    overflow_y: auto
+
+  footer:
+    padding: 20px 30px
+    background: #F9FAFB
+    border_top: "1px solid #E5E7EB"
+    border_radius: "0 0 12px 12px"
+    display: flex
+    gap: 12px
+    justify_content: flex-end
+
+  summary_text:
+    font_size: 14px
+    line_height: 1.8
+    color: "#374151"
+
+  model_info:
+    font_size: 12px
+    color: "#9CA3AF"
+    text_align: right
+    margin_top: 20px
+    padding_top: 15px
+    border_top: "1px solid #E5E7EB"
+
+# ============================================
+# 반응형 디자인
+# ============================================
+responsive:
+  mobile:
+    width: "calc(100% - 20px)"
+    max_height: 90vh
+    padding: 20px
+    footer:
+      flex_direction: column
+      buttons:
+        width: 100%
+  tablet:
+    width: 500px
+  desktop:
+    width: 600px
+
+# ============================================
+# 접근성 (a11y)
+# ============================================
+accessibility:
+  role: dialog
+  aria_labelledby: modal_title
+  aria_modal: true
+  focus_trap: true
+  keyboard_shortcuts:
+    - key: Escape
+      action: close_modal
+    - key: Ctrl+Enter
+      action: regenerate_summary (if button focused)
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 요약 표시
+    when: 모달 열림 (기존 요약 있음)
+    then:
+      - AI 요약 텍스트 표시 (마크다운 렌더링)
+      - 모델명 및 생성시간 표시
+      - "전체 회의록 보기" 버튼 활성화
+      - "재생성" 버튼 활성화
+
+  - name: 요약 로딩
+    when: 모달 열림 (요약 로딩 중)
+    then:
+      - 스피너 표시
+      - "요약을 생성하고 있습니다..." 메시지
+      - 버튼 비활성화
+
+  - name: 요약 재생성
+    when: "재생성" 버튼 클릭
+    then:
+      - 로딩 상태 진입
+      - POST /api/meetings/:id/summary/regenerate 호출
+      - 새 요약 텍스트 표시
+      - 토스트: "요약이 재생성되었습니다" 표시
+      - 스크롤 최상단으로 이동
+
+  - name: 에러 처리
+    when: 요약 생성 실패
+    then:
+      - 에러 메시지 표시
+      - "다시 시도해주세요" 안내
+      - "재생성" 버튼으로 재시도 가능
+
+  - name: 전체 회의록 이동
+    when: "전체 회의록 보기" 버튼 클릭
+    then:
+      - 모달 닫힘
+      - /vod/:id 페이지로 이동
+      - 해당 회의의 전체 자막 표시
+
+  - name: 모달 닫기
+    when: X 버튼 또는 Escape 키 또는 배경 클릭
+    then:
+      - 모달 slide-down 애니메이션으로 종료
+      - 배경 페이지 활성화

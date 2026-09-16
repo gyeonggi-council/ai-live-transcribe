@@ -1,0 +1,310 @@
+# S-15: 로그인
+version: "2.0"
+
+screen:
+  id: S-15
+  name: 로그인
+  route: /login
+  layout: full-width
+  auth_required: false
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: users
+    alias: user_lookup
+    needs: [id, username, email, role, active]
+    filters: { username: "?username" }
+    description: 로그인 인증용 사용자 조회
+
+# ============================================
+# 컴포넌트
+# ============================================
+components:
+  - id: login_container
+    type: container
+    position: main
+    class: centered-dialog
+    styles:
+      display: flex
+      align_items: center
+      justify_content: center
+      height: 100vh
+      background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)
+
+  - id: login_card
+    type: card
+    position: main
+    function: 로그인 폼 컨테이너
+    width: 400px
+    padding: 40px
+    styles:
+      background: white
+      border_radius: 12px
+      box_shadow: 0 10px 40px rgba(0,0,0,0.1)
+
+  - id: logo
+    type: image
+    position: login_card
+    src: "/assets/logo-ggc.svg"
+    alt: "경기도의회 로고"
+    width: 200px
+    margin_bottom: 30px
+    styles:
+      text_align: center
+
+  - id: title
+    type: heading
+    position: login_card
+    level: 1
+    text: "실시간 자막 서비스"
+    styles:
+      font_size: 24px
+      font_weight: bold
+      color: "#1F2937"
+      text_align: center
+      margin_bottom: 8px
+
+  - id: subtitle
+    type: paragraph
+    position: login_card
+    text: "경기도의회 회의 자막"
+    styles:
+      color: "#6B7280"
+      text_align: center
+      margin_bottom: 30px
+
+  - id: login_form
+    type: form
+    position: login_card
+    fields:
+      - id: username_input
+        type: text
+        label: "사용자명 또는 이메일"
+        placeholder: "admin@example.com"
+        required: true
+        error_message: "필수 입력 항목입니다"
+        validation:
+          - type: required
+          - type: email_or_username
+
+      - id: password_input
+        type: password
+        label: "비밀번호"
+        placeholder: "••••••••"
+        required: true
+        error_message: "비밀번호를 입력해주세요"
+        validation:
+          - type: required
+          - type: min_length
+            value: 6
+
+      - id: remember_me
+        type: checkbox
+        label: "로그인 유지"
+        value: false
+
+    buttons:
+      - id: login_submit
+        type: submit
+        label: "로그인"
+        variant: primary
+        full_width: true
+        loading_state: "로그인 중..."
+        event: submit_login
+        disabled_condition: |
+          username_input.empty || password_input.empty
+
+  - id: divider
+    type: divider
+    position: login_card
+    margin: 20px 0
+    label: "또는"
+
+  - id: anonymous_link
+    type: button
+    position: login_card
+    label: "비로그인으로 계속"
+    variant: secondary
+    full_width: true
+    event: navigate(/)
+    styles:
+      color: "#3B82F6"
+      border_color: "#3B82F6"
+
+  - id: forgot_password_link
+    type: link
+    position: login_card
+    text: "비밀번호를 잊으셨나요?"
+    href: /forgot-password
+    styles:
+      display: block
+      text_align: center
+      margin_top: 15px
+      font_size: 14px
+      color: "#3B82F6"
+
+  - id: error_message
+    type: alert
+    position: login_card
+    variant: error
+    visibility:
+      condition: login_error.present
+    message: "{{ login_error.message }}"
+    dismissible: true
+    styles:
+      margin_bottom: 20px
+      margin_top: 0
+
+  - id: toast
+    type: shared
+    ref: shared/toast
+
+# ============================================
+# 상태 처리
+# ============================================
+states:
+  initial:
+    condition: page_loaded
+    display:
+      - login_form (focused on username_input)
+
+  validating:
+    condition: form_submitted
+    display:
+      - login_submit button disabled
+      - loading spinner
+      - message: "로그인 중..."
+
+  success:
+    condition: login_successful
+    action:
+      - redirect to / (with auth token)
+      - show toast: "로그인되었습니다"
+
+  error_invalid_credentials:
+    condition: login_failed && error_type == "invalid_credentials"
+    display:
+      - error_message: "사용자명 또는 비밀번호가 잘못되었습니다"
+      - password_input.clear()
+      - password_input.focus()
+
+  error_account_inactive:
+    condition: login_failed && error_type == "account_inactive"
+    display:
+      - error_message: "계정이 비활성화되었습니다. 관리자에게 문의하세요"
+
+  error_server:
+    condition: login_failed && error_type == "server_error"
+    display:
+      - error_message: "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요"
+
+# ============================================
+# 인증 설정
+# ============================================
+authentication:
+  method: basic_auth + jwt
+  endpoint: POST /api/auth/login
+  request_fields:
+    - username_or_email
+    - password
+    - remember_me
+  response_fields:
+    - user_id
+    - username
+    - email
+    - role
+    - token (JWT)
+    - expires_in
+  token_storage: localStorage + httpOnly cookie
+  redirect_on_success: /
+  redirect_on_failure: null (stay on page)
+
+# ============================================
+# 보안 기능
+# ============================================
+security:
+  rate_limiting: 5 attempts per minute per IP
+  account_lockout: 5 failed attempts = 15 min lockout
+  password_requirements:
+    - minimum_length: 6
+    - complexity: medium (영문+숫자 또는 특수문자)
+  password_hashing: bcrypt
+  session_timeout: 24 hours
+  token_refresh: auto-refresh before expiry
+
+# ============================================
+# 연결점 (Navigation)
+# ============================================
+navigation:
+  incoming:
+    - from: any page
+      condition: session expired
+      redirect: /login?from=:previous_path
+  outgoing:
+    - to: /
+      trigger: login_success
+      with_auth: true
+    - to: /
+      trigger: click:anonymous_link
+    - to: /forgot-password
+      trigger: click:forgot_password_link
+
+# ============================================
+# 반응형 디자인
+# ============================================
+responsive:
+  mobile:
+    login_card:
+      width: "calc(100% - 40px)"
+      padding: 30px 20px
+      margin: 20px
+  tablet:
+    login_card:
+      width: 360px
+  desktop:
+    login_card:
+      width: 400px
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 로그인 성공
+    when: 유효한 사용자명과 비밀번호 입력 후 로그인 버튼 클릭
+    then:
+      - 로그인 요청 전송 (username, password)
+      - JWT 토큰 받음
+      - 토큰 localStorage 저장
+      - "/" 페이지로 리다이렉트
+      - 토스트: "로그인되었습니다" 표시
+
+  - name: 로그인 실패 (잘못된 자격증명)
+    when: 잘못된 비밀번호 입력 후 로그인 버튼 클릭
+    then:
+      - 에러 메시지: "사용자명 또는 비밀번호가 잘못되었습니다" 표시
+      - 비밀번호 입력창 비우기
+      - 비밀번호 입력창에 포커스
+
+  - name: 비로그인 계속
+    when: "비로그인으로 계속" 버튼 클릭
+    then:
+      - 인증 없이 "/" 페이지로 이동
+      - 권한 제한 기능 미제공
+
+  - name: 입력 검증
+    when: 사용자명 또는 비밀번호 미입력
+    then:
+      - 로그인 버튼 비활성화
+      - 빈 필드 옆 에러 아이콘 표시
+
+  - name: 계정 비활성화
+    when: 비활성화된 계정으로 로그인 시도
+    then:
+      - 에러 메시지: "계정이 비활성화되었습니다" 표시
+      - 관리자 문의 링크 제공
+
+  - name: 비밀번호 찾기
+    when: "비밀번호를 잊으셨나요?" 링크 클릭
+    then: /forgot-password 페이지로 이동

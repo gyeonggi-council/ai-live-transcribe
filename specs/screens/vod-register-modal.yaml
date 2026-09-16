@@ -1,0 +1,107 @@
+# M-01: VOD 등록 모달
+version: "2.0"
+
+modal:
+  id: M-01
+  name: VOD 등록 모달
+  triggers:
+    - screen: S-01
+      element: register_vod_button
+    - screen: S-03
+      element: register_button
+
+# ============================================
+# 데이터 요구사항
+# ============================================
+data_requirements:
+  - resource: meetings
+    action: create
+    needs: [title, meeting_date, vod_url]
+    description: 새 VOD 회의 등록
+
+# ============================================
+# 폼 정의
+# ============================================
+form:
+  id: vod_register_form
+  fields:
+    - id: title
+      type: text
+      label: 회의 제목
+      placeholder: "예: 제11대 제396회 본회의"
+      required: true
+      validation:
+        min_length: 2
+        error_message: "제목은 2자 이상 입력해주세요"
+
+    - id: meeting_date
+      type: date
+      label: 회의 날짜
+      required: true
+      default: today
+      validation:
+        error_message: "날짜를 선택해주세요"
+
+    - id: vod_url
+      type: url
+      label: VOD URL
+      placeholder: "https://kms.ggc.go.kr/mp4/..."
+      required: true
+      validation:
+        pattern: "^https?://"
+        error_message: "올바른 URL 형식을 입력해주세요"
+
+  submit:
+    label: 등록
+    variant: primary
+    loading_label: 등록 중...
+
+  cancel:
+    label: 취소
+
+# ============================================
+# 이벤트
+# ============================================
+events:
+  - on: submit
+    do:
+      - validate_form
+      - call_api: POST /api/meetings
+      - on_success:
+          - close_modal
+          - show_toast(success, "VOD가 등록되었습니다. 자막 생성을 시작합니다.")
+          - refresh_vod_list
+      - on_error:
+          - show_form_error(response.message)
+
+  - on: cancel
+    do: close_modal
+
+  - on: backdrop_click
+    do: close_modal
+
+  - on: escape_key
+    do: close_modal
+
+# ============================================
+# 테스트 시나리오
+# ============================================
+tests:
+  - name: 유효성 검사 실패
+    when: 제목 1자 입력 후 등록 클릭
+    then: "제목은 2자 이상 입력해주세요" 에러 표시
+
+  - name: 등록 성공
+    when: 유효한 폼 제출
+    then:
+      - API 호출 성공
+      - 모달 닫힘
+      - "VOD가 등록되었습니다" 토스트 표시
+
+  - name: 등록 실패
+    when: API 에러 응답
+    then: 폼에 에러 메시지 표시
+
+  - name: 취소
+    when: 취소 버튼 클릭
+    then: 모달 닫힘, 데이터 초기화
